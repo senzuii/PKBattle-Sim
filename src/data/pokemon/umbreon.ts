@@ -1,0 +1,47 @@
+import { PokemonBase } from '../../types/Pokemon';
+
+export const umbreon: PokemonBase = {
+  id: 'umbreon',
+  name: 'Umbreon',
+  types: ['Dark'],
+  baseStats: {
+    hp: 95,
+    atk: 65,
+    def: 110,
+    spa: 60,
+    spd: 130,
+    spe: 65,
+  },
+  abilities: ['Synchronize', 'Inner Focus'],
+  learnset: [
+    { level: 0, moveId: 'pursuit' },
+    { level: 0, moveId: 'snarl' },
+    { level: 1, moveId: 'tackle' },
+    { level: 1, moveId: 'takedown' },
+    { level: 1, moveId: 'doubleedge' },
+    { level: 1, moveId: 'tailwhip' },
+    { level: 1, moveId: 'bite' },
+    { level: 1, moveId: 'growl' },
+    { level: 1, moveId: 'swift' },
+    { level: 1, moveId: 'charm' },
+    { level: 1, moveId: 'batonpass' },
+    { level: 1, moveId: 'helpinghand' },
+    { level: 1, moveId: 'covet' },
+    { level: 1, moveId: 'copycat' },
+    { level: 1, moveId: 'foulplay' },
+    { level: 5, moveId: 'sandattack' },
+    { level: 6, moveId: 'quickattack' },
+    { level: 9, moveId: 'babydolleyes' },
+    { level: 17, moveId: 'confuseray' },
+    { level: 20, moveId: 'feintattack' },
+    { level: 25, moveId: 'mimic' },
+    { level: 25, moveId: 'assurance' },
+    { level: 25, moveId: 'darkpulse' },
+    { level: 29, moveId: 'screech' },
+    { level: 30, moveId: 'moonlight' },
+    { level: 34, moveId: 'calmmind' },
+    { level: 35, moveId: 'guardswap' },
+    { level: 37, moveId: 'meanlook' },
+    { level: 41, moveId: 'lastresort' }
+  ]
+};

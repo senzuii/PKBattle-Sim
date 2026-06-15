@@ -1,0 +1,7 @@
+import { Ability } from '../../../types/Pokemon';
+
+export const unnerve: Ability = {
+  id: "Unnerve",
+  name: "Unnerve",
+  description: "Makes the foe nervous and unable to eat Berries.",
+};

@@ -1,0 +1,14 @@
+import { Move } from '../../../types/Pokemon';
+
+const highjumpkick: Move = {
+  id: 'highjumpkick',
+  name: 'High Jump Kick',
+  type: 'Fighting',
+  category: 'Physical',
+  power: 130,
+  accuracy: 90,
+  pp: 10,
+  description: 'May miss and hurt the user.',
+};
+
+export default highjumpkick;

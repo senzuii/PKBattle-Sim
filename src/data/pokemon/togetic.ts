@@ -1,0 +1,45 @@
+import { PokemonBase } from '../../types/Pokemon';
+
+export const togetic: PokemonBase = {
+  id: 'togetic',
+  name: 'Togetic',
+  types: ['Fairy', 'Flying'],
+  baseStats: {
+    hp: 55,
+    atk: 40,
+    def: 85,
+    spa: 80,
+    spd: 105,
+    spe: 40,
+  },
+  abilities: ['Hustle', 'Serene Grace', 'Super Luck'],
+  learnset: [
+    { level: 0, moveId: 'aircutter' },
+    { level: 0, moveId: 'fairywind' },
+    { level: 1, moveId: 'pound' },
+    { level: 1, moveId: 'tackle' },
+    { level: 1, moveId: 'growl' },
+    { level: 1, moveId: 'metronome' },
+    { level: 1, moveId: 'sweetkiss' },
+    { level: 1, moveId: 'charm' },
+    { level: 1, moveId: 'magicalleaf' },
+    { level: 1, moveId: 'lifedew' },
+    { level: 11, moveId: 'drainingkiss' },
+    { level: 13, moveId: 'yawn' },
+    { level: 16, moveId: 'ancientpower' },
+    { level: 17, moveId: 'encore' },
+    { level: 18, moveId: 'calmmind' },
+    { level: 21, moveId: 'followme' },
+    { level: 25, moveId: 'airslash' },
+    { level: 25, moveId: 'bestow' },
+    { level: 25, moveId: 'babydolleyes' },
+    { level: 28, moveId: 'wish' },
+    { level: 28, moveId: 'afteryou' },
+    { level: 31, moveId: 'safeguard' },
+    { level: 32, moveId: 'doubleedge' },
+    { level: 34, moveId: 'extrasensory' },
+    { level: 41, moveId: 'batonpass' },
+    { level: 43, moveId: 'moonblast' },
+    { level: 48, moveId: 'lastresort' }
+  ]
+};
