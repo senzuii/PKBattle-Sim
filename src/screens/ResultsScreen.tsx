@@ -44,10 +44,10 @@ const rS = StyleSheet.create({
   sprite: { width: 48, height: 48 },
   info: { flex: 1, paddingVertical: 8, paddingRight: 14, paddingLeft: 10 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  name: { color: '#F8FAFC', fontWeight: '600', flex: 1 },
-  level: { color: '#94A3B8', fontWeight: '500' },
+  name: { color: '#F8FAFC', fontWeight: '500', flex: 1 },
+  level: { color: '#94A3B8', fontWeight: '400' },
   faintBadge: { backgroundColor: '#EF4444', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 'auto' },
-  faintBadgeTxt: { color: '#FFF', fontSize: 10, fontWeight: '900' },
+  faintBadgeTxt: { color: '#FFF', fontSize: 10, fontWeight: '700' },
 });
 
 export const ResultsScreen: React.FC = () => {
@@ -182,23 +182,23 @@ const s = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', paddingVertical: 18, paddingHorizontal: 16,
   },
   bannerAccent: { position: 'absolute', top: 0, left: 0, right: 0, height: 4 },
-  bannerText: { fontWeight: '900', letterSpacing: 6 },
+  bannerText: { fontWeight: '700', letterSpacing: 6 },
   narrativeText: { color: '#CBD5E1', textAlign: 'center', marginTop: 10, lineHeight: 18, maxWidth: 480 },
 
   statsRow: { width: '100%', maxWidth: 480, flexDirection: 'row', gap: 8, marginVertical: 12 },
   statCard: { flex: 1, backgroundColor: '#1E293B', borderRadius: 10, borderWidth: 1, borderColor: '#334155', alignItems: 'center', paddingVertical: 10 },
-  statValue: { color: '#F8FAFC', fontSize: 18, fontWeight: '900', fontFamily: 'monospace' },
-  statLabel: { color: '#64748B', fontSize: 9, fontWeight: '800', letterSpacing: 1, marginTop: 2 },
+  statValue: { color: '#F8FAFC', fontSize: 18, fontWeight: '700', fontFamily: 'monospace' },
+  statLabel: { color: '#64748B', fontSize: 9, fontWeight: '600', letterSpacing: 1, marginTop: 2 },
 
   actionsRow: { flexDirection: 'row', gap: 10, padding: 16, borderTopWidth: 1, borderTopColor: '#334155' },
   actionBtn: { flex: 1, borderRadius: 10, borderWidth: 1.5, paddingVertical: 14, alignItems: 'center' },
-  actionBtnTxt: { fontSize: 13, fontWeight: '900', letterSpacing: 1.5 },
+  actionBtnTxt: { fontSize: 13, fontWeight: '700', letterSpacing: 1.5 },
 
   rosterHeader: { paddingVertical: 10, alignItems: 'center', backgroundColor: '#0f172a', borderBottomWidth: 1, borderBottomColor: '#1e293b' },
-  rosterHeaderTxt: { color: '#94A3B8', fontSize: 11, fontWeight: '900', letterSpacing: 2 },
+  rosterHeaderTxt: { color: '#94A3B8', fontSize: 11, fontWeight: '700', letterSpacing: 2 },
   rosterContent: { padding: 10, alignItems: 'center' },
   rosterTeams: { width: '100%', maxWidth: 900, flexDirection: 'row', gap: 16 },
   rosterTeamColumn: { flex: 1 },
   rosterGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
-  rosterLabel: { width: '100%', fontSize: 10, fontWeight: '900', letterSpacing: 1.5, marginBottom: 6 },
+  rosterLabel: { width: '100%', fontSize: 10, fontWeight: '700', letterSpacing: 1.5, marginBottom: 6 },
 });

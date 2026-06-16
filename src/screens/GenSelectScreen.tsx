@@ -136,10 +136,10 @@ const s = StyleSheet.create({
     borderBottomColor: '#1E293B',
   },
   backBtn: { backgroundColor: '#1E293B', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: '#334155' },
-  backTxt: { color: '#94A3B8', fontWeight: '900', fontSize: 11, letterSpacing: 1 },
+  backTxt: { color: '#94A3B8', fontWeight: '700', fontSize: 11, letterSpacing: 1 },
   headerCenter: { alignItems: 'center', gap: 4 },
-  headerTitle: { color: '#F8FAFC', fontSize: 18, fontWeight: '900', letterSpacing: 2 },
-  headerSub: { color: '#64748B', fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
+  headerTitle: { color: '#F8FAFC', fontSize: 18, fontWeight: '700', letterSpacing: 2 },
+  headerSub: { color: '#64748B', fontSize: 10, fontWeight: '500', letterSpacing: 0.5 },
 
   cardGrid: {
     flexDirection: 'row',
@@ -175,7 +175,7 @@ const s = StyleSheet.create({
   },
   gameName: {
     fontSize: 12,
-    fontWeight: '900',
+    fontWeight: '700',
     color: '#F1F5F9',
     letterSpacing: 1,
     textAlign: 'center',
@@ -183,7 +183,7 @@ const s = StyleSheet.create({
   genTag: {
     fontSize: 9,
     color: '#64748B',
-    fontWeight: '800',
+    fontWeight: '600',
     letterSpacing: 1.5,
     textAlign: 'center',
   },
@@ -196,7 +196,7 @@ const s = StyleSheet.create({
   activeBadgeTxt: {
     color: '#0F172A',
     fontSize: 9,
-    fontWeight: '900',
+    fontWeight: '700',
     letterSpacing: 1,
   },
   soonBadge: {
@@ -205,7 +205,7 @@ const s = StyleSheet.create({
   soonBadgeTxt: {
     color: '#64748B',
     fontSize: 9,
-    fontWeight: '900',
+    fontWeight: '700',
     letterSpacing: 1.5,
   },
 });

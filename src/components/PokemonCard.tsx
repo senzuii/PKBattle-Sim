@@ -157,13 +157,13 @@ const styles = StyleSheet.create({
   },
   name: {
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#FFFFFF',
     letterSpacing: 0.5,
   },
   level: {
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: '500',
     color: '#94A3B8',
   },
   typesRow: {
@@ -180,7 +180,7 @@ const styles = StyleSheet.create({
   typeText: {
     color: '#FFFFFF',
     fontSize: 8,
-    fontWeight: '800',
+    fontWeight: '600',
     letterSpacing: 0.5,
   },
   statusRow: {
@@ -200,7 +200,7 @@ const styles = StyleSheet.create({
   statusBadgeText: {
     color: '#FFFFFF',
     fontSize: 8,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   stageBadge: {
     borderWidth: 1,
@@ -212,7 +212,7 @@ const styles = StyleSheet.create({
   },
   stageBadgeText: {
     fontSize: 8,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   statsTable: {
     marginTop: 5,
@@ -232,7 +232,7 @@ const styles = StyleSheet.create({
   statLabel: {
     fontSize: 8,
     color: '#64748B',
-    fontWeight: '700',
+    fontWeight: '500',
     marginBottom: 1,
   },
   statValueContainer: {
@@ -241,12 +241,12 @@ const styles = StyleSheet.create({
   },
   statValue: {
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#F1F5F9',
   },
   statStageText: {
     fontSize: 8,
-    fontWeight: '800',
+    fontWeight: '600',
     marginLeft: 2,
   },
 });

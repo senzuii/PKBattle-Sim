@@ -84,8 +84,8 @@ const TeamSlot: React.FC<{
   pokemon: CustomPokemon | null;
   onEdit: () => void;
   onClear: () => void;
-  width: number;
-}> = ({ slotIdx, pokemon, onEdit, onClear, width }) => {
+  compact?: boolean;
+}> = ({ slotIdx, pokemon, onEdit, onClear, compact }) => {
   const empty = !pokemon;
   const sprite = pokemon ? FrontSprites[pokemon.speciesId.replace(/[^a-z0-9]/g, '')] : null;
   const pokeData = pokemon ? POKEMON[pokemon.speciesId] : null;
@@ -93,7 +93,7 @@ const TeamSlot: React.FC<{
 
   return (
     <TouchableOpacity
-      style={[slot.card, { width }, !empty && slot.cardFilled]}
+      style={[slot.card, compact && slot.cardCompact, !empty && slot.cardFilled]}
       onPress={onEdit}
       activeOpacity={0.75}
     >
@@ -105,20 +105,22 @@ const TeamSlot: React.FC<{
 
       {empty ? (
         <View style={slot.emptyInner}>
-          <View style={slot.plusCircle}><Text style={slot.plusTxt}>+</Text></View>
-          <Text style={slot.slotNumTxt}>{slotIdx + 1}</Text>
+          <View style={[slot.plusCircle, compact && slot.plusCircleCompact]}><Text style={[slot.plusTxt, compact && { fontSize: 18, lineHeight: 22 }]}>+</Text></View>
+          {!compact && <Text style={slot.slotNumTxt}>{slotIdx + 1}</Text>}
         </View>
       ) : (
         <View style={slot.filledInner}>
-          {sprite && <Image source={sprite} style={slot.sprite} resizeMode="contain" />}
+          {sprite && <Image source={sprite} style={compact ? slot.spriteCompact : slot.sprite} resizeMode="contain" />}
           <Text style={slot.pokeName} numberOfLines={1}>{pokeData?.name}</Text>
-          <View style={slot.typeRow}>
-            {types.map(t => (
-              <View key={t} style={[slot.typePill, { backgroundColor: TYPE_COLORS[t] ?? '#555' }]}>
-                <Text style={slot.typePillTxt}>{t.toUpperCase()}</Text>
-              </View>
-            ))}
-          </View>
+          {!compact && (
+            <View style={slot.typeRow}>
+              {types.map(t => (
+                <View key={t} style={[slot.typePill, { backgroundColor: TYPE_COLORS[t] ?? '#555' }]}>
+                  <Text style={slot.typePillTxt}>{t.toUpperCase()}</Text>
+                </View>
+              ))}
+            </View>
+          )}
           <Text style={slot.lvlTxt}>Lv. {pokemon.level}</Text>
         </View>
       )}
@@ -133,32 +135,39 @@ const slot = StyleSheet.create({
     backgroundColor: '#0F172A', borderStyle: 'dashed',
     aspectRatio: 0.72, overflow: 'hidden',
   },
+  // Compact: shorter, narrower so all six fit one row on landscape phones
+  cardCompact: { minWidth: 84, maxWidth: 130, margin: 4, borderRadius: 12, aspectRatio: 0.95 },
   cardFilled: { borderColor: '#334155', borderStyle: 'solid', backgroundColor: '#111827' },
   clearBtn: {
     position: 'absolute', top: 8, right: 8, zIndex: 10,
     width: 22, height: 22, borderRadius: 11,
     backgroundColor: '#EF4444', alignItems: 'center', justifyContent: 'center',
   },
-  clearTxt: { color: '#FFF', fontSize: 10, fontWeight: '900', lineHeight: 14 },
+  clearTxt: { color: '#FFF', fontSize: 10, fontWeight: '700', lineHeight: 14 },
   emptyInner: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8 },
   plusCircle: {
     width: 40, height: 40, borderRadius: 20,
     backgroundColor: '#1E293B', alignItems: 'center', justifyContent: 'center',
   },
+  plusCircleCompact: { width: 30, height: 30, borderRadius: 15 },
   plusTxt: { color: '#475569', fontSize: 24, fontWeight: '300', lineHeight: 28 },
-  slotNumTxt: { color: '#334155', fontSize: 11, fontWeight: '900', letterSpacing: 1 },
+  slotNumTxt: { color: '#334155', fontSize: 11, fontWeight: '700', letterSpacing: 1 },
   filledInner: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 8, gap: 4 },
   sprite: { width: 72, height: 72 },
-  pokeName: { color: '#F8FAFC', fontSize: 11, fontWeight: '800', textAlign: 'center' },
+  spriteCompact: { width: 44, height: 44 },
+  pokeName: { color: '#F8FAFC', fontSize: 11, fontWeight: '600', textAlign: 'center' },
   typeRow: { flexDirection: 'row', gap: 3, flexWrap: 'wrap', justifyContent: 'center' },
   typePill: { paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4 },
-  typePillTxt: { color: '#FFF', fontSize: 7, fontWeight: '900', letterSpacing: 0.3 },
-  lvlTxt: { color: '#64748B', fontSize: 9, fontWeight: '700' },
+  typePillTxt: { color: '#FFF', fontSize: 7, fontWeight: '700', letterSpacing: 0.3 },
+  lvlTxt: { color: '#64748B', fontSize: 9, fontWeight: '500' },
 });
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export const BattleSetupScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const shortScreen = height < 500; // landscape phones — shrink slots & chrome
   const {
     opponentChoice, opponentPresetId, difficulty,
     setOpponentChoice, setOpponentPresetId, setDifficulty,
@@ -364,7 +373,7 @@ export const BattleSetupScreen: React.FC = () => {
   return (
     <View style={s.root}>
       {/* ── Header ── */}
-      <View style={s.header}>
+      <View style={[s.header, { paddingTop: insets.top + (shortScreen ? 8 : 12), paddingBottom: shortScreen ? 8 : 12, paddingLeft: insets.left + 16, paddingRight: insets.right + 16 }]}>
         <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()}>
           <Text style={s.backTxt}>← BACK</Text>
         </TouchableOpacity>
@@ -406,15 +415,16 @@ export const BattleSetupScreen: React.FC = () => {
                 </TouchableOpacity>
               </View>
             </View>
-            <View style={s.teamGrid}>
+            <ScrollView contentContainerStyle={s.teamGrid} showsVerticalScrollIndicator={false}>
               {quickTeamSlots.map((pokemon, idx) => (
                 <TeamSlot
                   key={idx} slotIdx={idx} pokemon={pokemon}
+                  compact={shortScreen}
                   onEdit={() => openEditModal(idx)}
                   onClear={() => { const n = [...quickTeamSlots]; n[idx] = null; setQuickTeamSlots(n); }}
                 />
               ))}
-            </View>
+            </ScrollView>
           </View>
         )}
 
@@ -493,6 +503,7 @@ export const BattleSetupScreen: React.FC = () => {
                   {quickOpponentTeamSlots.map((pokemon, idx) => (
                     <TeamSlot
                       key={idx} slotIdx={idx} pokemon={pokemon}
+                      compact={shortScreen}
                       onEdit={() => openEditModal(idx, 'opponent')}
                       onClear={() => { const n = [...quickOpponentTeamSlots]; n[idx] = null; setQuickOpponentTeamSlots(n); }}
                     />
@@ -505,7 +516,7 @@ export const BattleSetupScreen: React.FC = () => {
 
         {/* DIFFICULTY TAB */}
         {activeTab === 'difficulty' && (
-          <View style={s.tabScroll}>
+          <ScrollView contentContainerStyle={s.tabScroll}>
             <Text style={s.panelTitle}>AI DIFFICULTY</Text>
             <View style={s.diffGrid}>
               {[
@@ -518,25 +529,25 @@ export const BattleSetupScreen: React.FC = () => {
                 return (
                   <TouchableOpacity
                     key={d.key}
-                    style={[s.diffCard, active && { borderColor: d.color, backgroundColor: `${d.color}15` }]}
+                    style={[s.diffCard, shortScreen && s.diffCardCompact, active && { borderColor: d.color, backgroundColor: `${d.color}15` }]}
                     onPress={() => setDifficulty(d.key as any)}
                   >
-                    <Text style={s.diffIcon}>{d.icon}</Text>
+                    <Text style={[s.diffIcon, shortScreen && { fontSize: 24 }]}>{d.icon}</Text>
                     <Text style={[s.diffLabel, active && { color: d.color }]}>{d.label}</Text>
-                    <Text style={s.diffDesc}>{d.desc}</Text>
+                    <Text style={s.diffDesc} numberOfLines={shortScreen ? 2 : undefined}>{d.desc}</Text>
                     {active && <View style={[s.diffCheck, { backgroundColor: d.color }]}><Text style={s.diffCheckTxt}>✓</Text></View>}
                   </TouchableOpacity>
                 );
               })}
             </View>
-          </View>
+          </ScrollView>
         )}
       </View>
 
       {/* ── Bottom CTA ── */}
-      <View style={s.bottomBar}>
-        <TouchableOpacity style={[s.startBtn, !canStart && s.startBtnDisabled]} onPress={handleStartBattle} disabled={!canStart}>
-          <Text style={s.startBtnTxt}>⚔️  COMMENCE BATTLE</Text>
+      <View style={[s.bottomBar, { paddingBottom: insets.bottom + (shortScreen ? 8 : 16), paddingTop: shortScreen ? 8 : 16, paddingLeft: insets.left + 16, paddingRight: insets.right + 16 }]}>
+        <TouchableOpacity style={[s.startBtn, shortScreen && { paddingVertical: 12 }, !canStart && s.startBtnDisabled]} onPress={handleStartBattle} disabled={!canStart}>
+          <Text style={[s.startBtnTxt, shortScreen && { fontSize: 14 }]}>⚔️  COMMENCE BATTLE</Text>
         </TouchableOpacity>
       </View>
 
@@ -801,27 +812,27 @@ const s = StyleSheet.create({
     backgroundColor: '#0D1525', borderBottomWidth: 1.5, borderBottomColor: '#1E293B',
   },
   backBtn: { backgroundColor: '#1E293B', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: '#334155' },
-  backTxt: { color: '#94A3B8', fontWeight: '900', fontSize: 11, letterSpacing: 1 },
+  backTxt: { color: '#94A3B8', fontWeight: '700', fontSize: 11, letterSpacing: 1 },
   headerCenter: { alignItems: 'center', gap: 4 },
-  headerTitle: { color: '#F8FAFC', fontSize: 18, fontWeight: '900', letterSpacing: 2 },
+  headerTitle: { color: '#F8FAFC', fontSize: 18, fontWeight: '700', letterSpacing: 2 },
   genBadge: { backgroundColor: '#FF4554', paddingHorizontal: 10, paddingVertical: 3, borderRadius: 6 },
-  genBadgeTxt: { color: '#FFF', fontSize: 9, fontWeight: '900', letterSpacing: 1.5 },
+  genBadgeTxt: { color: '#FFF', fontSize: 9, fontWeight: '700', letterSpacing: 1.5 },
 
   tabBar: { flexDirection: 'row', backgroundColor: '#0D1525', borderBottomWidth: 1.5, borderBottomColor: '#1E293B' },
   tab: { flex: 1, alignItems: 'center', paddingVertical: 12, borderBottomWidth: 3, borderBottomColor: 'transparent' },
   tabActive: { borderBottomColor: '#00C3E3' },
-  tabLabel: { color: '#475569', fontSize: 11, fontWeight: '900', letterSpacing: 0.5 },
+  tabLabel: { color: '#475569', fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
   tabLabelActive: { color: '#00C3E3' },
-  tabSub: { color: '#334155', fontSize: 9, fontWeight: '700', marginTop: 2 },
+  tabSub: { color: '#334155', fontSize: 9, fontWeight: '500', marginTop: 2 },
   tabSubActive: { color: 'rgba(0,195,227,0.6)' },
 
   content: { flex: 1 },
   tabScroll: { padding: 20, gap: 16 },
 
   panelHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
-  panelTitle: { color: '#64748B', fontSize: 11, fontWeight: '900', letterSpacing: 2 },
+  panelTitle: { color: '#64748B', fontSize: 11, fontWeight: '700', letterSpacing: 2 },
   btnSecondary: { backgroundColor: 'rgba(139,92,246,0.15)', borderWidth: 1.5, borderColor: '#8B5CF6', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 10 },
-  btnSecondaryTxt: { color: '#8B5CF6', fontSize: 10, fontWeight: '900', letterSpacing: 0.5 },
+  btnSecondaryTxt: { color: '#8B5CF6', fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
 
   teamGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 12, justifyContent: 'center' },
 
@@ -829,27 +840,29 @@ const s = StyleSheet.create({
   opponentCard: { flex: 1, backgroundColor: '#111827', borderRadius: 16, borderWidth: 2, borderColor: '#1E293B', padding: 20, alignItems: 'center', gap: 6, position: 'relative', overflow: 'hidden' },
   opponentCardActive: { borderColor: '#00C3E3', backgroundColor: 'rgba(0,195,227,0.06)' },
   opponentIcon: { fontSize: 32 },
-  opponentLabel: { color: '#94A3B8', fontSize: 12, fontWeight: '900', letterSpacing: 1 },
+  opponentLabel: { color: '#94A3B8', fontSize: 12, fontWeight: '700', letterSpacing: 1 },
   opponentLabelActive: { color: '#00C3E3' },
-  opponentDesc: { color: '#475569', fontSize: 10, fontWeight: '700', textAlign: 'center' },
+  opponentDesc: { color: '#475569', fontSize: 10, fontWeight: '500', textAlign: 'center' },
   opponentCheck: { position: 'absolute', top: 10, right: 10, width: 22, height: 22, borderRadius: 11, backgroundColor: '#00C3E3', alignItems: 'center', justifyContent: 'center' },
-  opponentCheckTxt: { color: '#0F172A', fontSize: 12, fontWeight: '900' },
+  opponentCheckTxt: { color: '#0F172A', fontSize: 12, fontWeight: '700' },
 
   presetCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#111827', padding: 16, borderRadius: 12, borderWidth: 2, borderColor: '#1E293B', marginBottom: 8 },
   presetCardActive: { borderColor: '#FF4554', backgroundColor: 'rgba(255,69,84,0.06)' },
-  presetName: { color: '#F8FAFC', fontSize: 15, fontWeight: '900' },
-  presetSub: { color: '#64748B', fontSize: 11, fontWeight: '700', marginTop: 3 },
+  presetName: { color: '#F8FAFC', fontSize: 15, fontWeight: '700' },
+  presetSub: { color: '#64748B', fontSize: 11, fontWeight: '500', marginTop: 3 },
   presetCheckBadge: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#FF4554', alignItems: 'center', justifyContent: 'center' },
-  presetCheckTxt: { color: '#FFF', fontSize: 14, fontWeight: '900' },
+  presetCheckTxt: { color: '#FFF', fontSize: 14, fontWeight: '700' },
   emptyHint: { color: '#475569', fontStyle: 'italic', textAlign: 'center', padding: 24 },
 
   diffGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 12 },
   diffCard: { flex: 1, minWidth: '46%', backgroundColor: '#111827', borderRadius: 16, padding: 20, borderWidth: 2, borderColor: '#1E293B', alignItems: 'center', gap: 6, position: 'relative', overflow: 'hidden' },
+  // Short landscape: all four in one row, tighter padding
+  diffCardCompact: { minWidth: '22%', padding: 12, borderRadius: 12 },
   diffIcon: { fontSize: 32 },
-  diffLabel: { color: '#94A3B8', fontSize: 13, fontWeight: '900', letterSpacing: 1 },
-  diffDesc: { color: '#475569', fontSize: 10, fontWeight: '700', textAlign: 'center' },
+  diffLabel: { color: '#94A3B8', fontSize: 13, fontWeight: '700', letterSpacing: 1 },
+  diffDesc: { color: '#475569', fontSize: 10, fontWeight: '500', textAlign: 'center' },
   diffCheck: { position: 'absolute', top: 10, right: 10, width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  diffCheckTxt: { color: '#FFF', fontSize: 12, fontWeight: '900' },
+  diffCheckTxt: { color: '#FFF', fontSize: 12, fontWeight: '700' },
 
   bottomBar: { padding: 16, backgroundColor: '#0D1525', borderTopWidth: 1.5, borderTopColor: '#1E293B' },
   startBtn: {
@@ -857,7 +870,7 @@ const s = StyleSheet.create({
     shadowColor: '#FF4554', shadowOpacity: 0.45, shadowRadius: 16, shadowOffset: { width: 0, height: 6 },
   },
   startBtnDisabled: { opacity: 0.4 },
-  startBtnTxt: { color: '#FFF', fontSize: 16, fontWeight: '900', letterSpacing: 2 },
+  startBtnTxt: { color: '#FFF', fontSize: 16, fontWeight: '700', letterSpacing: 2 },
 });
 
 // ─── Edit Modal Styles ────────────────────────────────────────────────────────
@@ -868,44 +881,44 @@ const m = StyleSheet.create({
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     padding: 16, borderBottomWidth: 1.5, borderBottomColor: '#1E293B',
   },
-  sheetTitle: { color: '#F8FAFC', fontSize: 14, fontWeight: '900', letterSpacing: 2 },
+  sheetTitle: { color: '#F8FAFC', fontSize: 14, fontWeight: '700', letterSpacing: 2 },
   randomBtn: { backgroundColor: 'rgba(0,195,227,0.12)', borderWidth: 1, borderColor: '#00C3E3', paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10 },
-  randomBtnTxt: { color: '#00C3E3', fontSize: 10, fontWeight: '900', letterSpacing: 0.5 },
+  randomBtnTxt: { color: '#00C3E3', fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
   closeBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#1E293B', alignItems: 'center', justifyContent: 'center' },
-  closeBtnTxt: { color: '#94A3B8', fontSize: 14, fontWeight: '900' },
+  closeBtnTxt: { color: '#94A3B8', fontSize: 14, fontWeight: '700' },
   editBody: { padding: 20, gap: 20 },
 
   emptyState: { alignItems: 'center', paddingVertical: 48, gap: 12 },
   emptyStateEmoji: { fontSize: 48 },
-  emptyStateTitle: { color: '#F8FAFC', fontSize: 18, fontWeight: '900' },
-  emptyStateDesc: { color: '#64748B', fontSize: 12, fontWeight: '700' },
+  emptyStateTitle: { color: '#F8FAFC', fontSize: 18, fontWeight: '700' },
+  emptyStateDesc: { color: '#64748B', fontSize: 12, fontWeight: '500' },
   pickBtn: { backgroundColor: '#00C3E3', paddingHorizontal: 28, paddingVertical: 14, borderRadius: 12, marginTop: 8 },
-  pickBtnTxt: { color: '#0F172A', fontSize: 13, fontWeight: '900', letterSpacing: 1.5 },
+  pickBtnTxt: { color: '#0F172A', fontSize: 13, fontWeight: '700', letterSpacing: 1.5 },
 
   heroRow: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   heroSprite: { width: 100, height: 100, backgroundColor: '#111827', borderRadius: 16, borderWidth: 1.5, borderColor: '#1E293B', alignItems: 'center', justifyContent: 'center' },
   heroImg: { width: 90, height: 90 },
-  heroName: { color: '#F8FAFC', fontSize: 22, fontWeight: '900' },
+  heroName: { color: '#F8FAFC', fontSize: 22, fontWeight: '700' },
   typePill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
-  typePillTxt: { color: '#FFF', fontSize: 9, fontWeight: '900', letterSpacing: 0.5 },
+  typePillTxt: { color: '#FFF', fontSize: 9, fontWeight: '700', letterSpacing: 0.5 },
   changeSpeciesBtn: { backgroundColor: 'rgba(0,195,227,0.12)', borderWidth: 1, borderColor: '#00C3E3', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, alignSelf: 'flex-start' },
-  changeSpeciesTxt: { color: '#00C3E3', fontSize: 10, fontWeight: '900', letterSpacing: 0.5 },
+  changeSpeciesTxt: { color: '#00C3E3', fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
 
   formGrid: { flexDirection: 'row', gap: 12 },
   formField: { flex: 1 },
-  fieldLabel: { color: '#475569', fontSize: 9, fontWeight: '900', letterSpacing: 2, marginBottom: 8 },
-  input: { backgroundColor: '#111827', color: '#F8FAFC', padding: 14, borderRadius: 12, borderWidth: 1.5, borderColor: '#1E293B', fontSize: 14, fontWeight: '800' },
+  fieldLabel: { color: '#475569', fontSize: 9, fontWeight: '700', letterSpacing: 2, marginBottom: 8 },
+  input: { backgroundColor: '#111827', color: '#F8FAFC', padding: 14, borderRadius: 12, borderWidth: 1.5, borderColor: '#1E293B', fontSize: 14, fontWeight: '600' },
 
   abilityPillWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   abilityPill: { paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, borderWidth: 1.5, borderColor: '#1E293B', backgroundColor: '#111827' },
   abilityPillActive: { borderColor: '#00C3E3', backgroundColor: 'rgba(0,195,227,0.1)' },
-  abilityPillTxt: { color: '#64748B', fontSize: 11, fontWeight: '800' },
+  abilityPillTxt: { color: '#64748B', fontSize: 11, fontWeight: '600' },
   abilityPillTxtActive: { color: '#00C3E3' },
 
   movesSection: { gap: 10 },
   movesSectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   randomMovesBtn: { backgroundColor: 'rgba(139,92,246,0.12)', borderWidth: 1, borderColor: '#8B5CF6', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
-  randomMovesBtnTxt: { color: '#8B5CF6', fontSize: 9, fontWeight: '900', letterSpacing: 0.5 },
+  randomMovesBtnTxt: { color: '#8B5CF6', fontSize: 9, fontWeight: '700', letterSpacing: 0.5 },
   movesGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   moveSlot: {
     flexBasis: '48%', backgroundColor: '#111827', borderRadius: 12,
@@ -914,16 +927,16 @@ const m = StyleSheet.create({
   },
   moveSlotAccent: { width: 4 },
   moveSlotContent: { flex: 1, padding: 12, justifyContent: 'space-between' },
-  emptyMoveTxt: { color: '#334155', fontSize: 12, fontWeight: '700', fontStyle: 'italic', flex: 1, textAlign: 'center', textAlignVertical: 'center', padding: 12 },
-  moveName: { color: '#F8FAFC', fontSize: 12, fontWeight: '900', marginBottom: 6 },
+  emptyMoveTxt: { color: '#334155', fontSize: 12, fontWeight: '500', fontStyle: 'italic', flex: 1, textAlign: 'center', textAlignVertical: 'center', padding: 12 },
+  moveName: { color: '#F8FAFC', fontSize: 12, fontWeight: '700', marginBottom: 6 },
   moveBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5 },
-  moveBadgeTxt: { color: '#FFF', fontSize: 8, fontWeight: '900' },
+  moveBadgeTxt: { color: '#FFF', fontSize: 8, fontWeight: '700' },
   moveCatBadge: { backgroundColor: '#1E293B', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5 },
-  moveCatBadgeTxt: { color: '#64748B', fontSize: 8, fontWeight: '900' },
+  moveCatBadgeTxt: { color: '#64748B', fontSize: 8, fontWeight: '700' },
 
   footer: { padding: 16, borderTopWidth: 1.5, borderTopColor: '#1E293B' },
   saveBtn: { backgroundColor: '#00C3E3', padding: 16, borderRadius: 14, alignItems: 'center' },
-  saveBtnTxt: { color: '#0F172A', fontSize: 14, fontWeight: '900', letterSpacing: 2 },
+  saveBtnTxt: { color: '#0F172A', fontSize: 14, fontWeight: '700', letterSpacing: 2 },
 });
 
 // ─── Picker Styles ────────────────────────────────────────────────────────────
@@ -931,14 +944,14 @@ const p = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', justifyContent: 'center', alignItems: 'center', padding: 16 },
   sheet: { backgroundColor: '#0D1525', borderRadius: 20, borderWidth: 1.5, borderColor: '#1E293B', width: '100%', maxWidth: 860, maxHeight: '90%' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1.5, borderBottomColor: '#1E293B' },
-  title: { color: '#F8FAFC', fontSize: 14, fontWeight: '900', letterSpacing: 2 },
+  title: { color: '#F8FAFC', fontSize: 14, fontWeight: '700', letterSpacing: 2 },
   closeBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#1E293B', alignItems: 'center', justifyContent: 'center' },
-  closeTxt: { color: '#94A3B8', fontSize: 14, fontWeight: '900' },
+  closeTxt: { color: '#94A3B8', fontSize: 14, fontWeight: '700' },
 
   searchRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1.5, borderBottomColor: '#1E293B', gap: 10 },
   searchIcon: { fontSize: 16 },
-  searchInput: { flex: 1, backgroundColor: '#111827', color: '#F8FAFC', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#1E293B', fontSize: 13, fontWeight: '700' },
-  clearSearch: { color: '#64748B', fontSize: 16, fontWeight: '900', padding: 4 },
+  searchInput: { flex: 1, backgroundColor: '#111827', color: '#F8FAFC', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#1E293B', fontSize: 13, fontWeight: '500' },
+  clearSearch: { color: '#64748B', fontSize: 16, fontWeight: '700', padding: 4 },
 
   grid: { flexDirection: 'row', flexWrap: 'wrap', padding: 12, gap: 8, justifyContent: 'center' },
   card: {
@@ -948,10 +961,10 @@ const p = StyleSheet.create({
   },
   cardSpriteWrap: { width: 64, height: 64, alignItems: 'center', justifyContent: 'center' },
   cardSprite: { width: 60, height: 60 },
-  cardName: { color: '#F8FAFC', fontSize: 10, fontWeight: '800', textAlign: 'center' },
+  cardName: { color: '#F8FAFC', fontSize: 10, fontWeight: '600', textAlign: 'center' },
   cardTypes: { flexDirection: 'row', gap: 3, flexWrap: 'wrap', justifyContent: 'center' },
   cardTypePill: { paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4 },
-  cardTypeTxt: { color: '#FFF', fontSize: 7, fontWeight: '900' },
+  cardTypeTxt: { color: '#FFF', fontSize: 7, fontWeight: '700' },
 });
 
 // ─── Move List Styles ─────────────────────────────────────────────────────────
@@ -962,9 +975,9 @@ const mv = StyleSheet.create({
     overflow: 'hidden', paddingRight: 12, minHeight: 52,
   },
   accent: { width: 5, alignSelf: 'stretch' },
-  name: { color: '#F8FAFC', fontSize: 13, fontWeight: '800', paddingLeft: 12, flex: 1 },
+  name: { color: '#F8FAFC', fontSize: 13, fontWeight: '600', paddingLeft: 12, flex: 1 },
   badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
-  badgeTxt: { color: '#FFF', fontSize: 9, fontWeight: '900' },
+  badgeTxt: { color: '#FFF', fontSize: 9, fontWeight: '700' },
   catBadge: { backgroundColor: '#1E293B', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
-  catTxt: { color: '#64748B', fontSize: 9, fontWeight: '900' },
+  catTxt: { color: '#64748B', fontSize: 9, fontWeight: '700' },
 });

@@ -10,6 +10,7 @@ import {
   Modal,
   useWindowDimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useBattleStore } from '../store/useBattleStore';
@@ -38,43 +39,32 @@ interface Sizes {
   controlsFlex: number;
 }
 
-const getSizes = (compact: boolean): Sizes => compact
-  ? {
-      compact: true,
-      enemySprite: 76,
-      playerSprite: 90,
-      hudMinWidth: 120,
-      hudFont: 9,
-      hudNameFont: 11,
-      moveBtnMinHeight: 34,
-      moveBtnPadding: 5,
-      moveMetaFont: 8,
-      moveNameFont: 10,
-      actionRowHeight: 24,
-      logFont: 9,
-      topBarFont: 9,
-      switchCardWidth: '48%',
-      arenaFlex: 5,
-      controlsFlex: 5,
-    }
-  : {
-      compact: false,
-      enemySprite: 110,
-      playerSprite: 130,
-      hudMinWidth: 150,
-      hudFont: 10,
-      hudNameFont: 13,
-      moveBtnMinHeight: 56,
-      moveBtnPadding: 8,
-      moveMetaFont: 9,
-      moveNameFont: 13,
-      actionRowHeight: 40,
-      logFont: 10,
-      topBarFont: 11,
-      switchCardWidth: '31%',
-      arenaFlex: 6,
-      controlsFlex: 4,
-    };
+// Battle is landscape, so screen HEIGHT is the limiting dimension. Sizes are
+// anchored so a typical landscape phone (~440dp tall) renders at ~1.0 and taller
+// windows scale UP a little — rather than shrinking a desktop layout down onto a
+// phone (which left everything cramped).
+const getSizes = (winWidth: number, winHeight: number): Sizes => {
+  const scale = Math.min(1.4, Math.max(0.9, winHeight / 440));
+  const r = (n: number) => Math.round(n * scale);
+  return {
+    compact: winHeight < 520,
+    enemySprite: r(82),
+    playerSprite: r(96),
+    hudMinWidth: r(172),
+    hudFont: r(10),
+    hudNameFont: r(12),
+    moveBtnMinHeight: r(40),
+    moveBtnPadding: r(7),
+    moveMetaFont: r(8),
+    moveNameFont: r(11),
+    actionRowHeight: r(32),
+    logFont: r(9),
+    topBarFont: r(10),
+    switchCardWidth: winWidth < 720 ? '48%' : '31%',
+    arenaFlex: 6,
+    controlsFlex: 4,
+  };
+};
 
 // ─── Popups ───────────────────────────────────────────────────────────────────
 interface PopupData {
@@ -117,15 +107,16 @@ const PopupAnimation: React.FC<{ popup: PopupData; onComplete: (id: string) => v
 };
 const popS = StyleSheet.create({
   container: { position: 'absolute', top: -30, alignSelf: 'center', backgroundColor: 'rgba(15,23,42,0.9)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1.5, borderColor: '#334155', zIndex: 100 },
-  text: { fontSize: 10, fontWeight: '900', letterSpacing: 0.5 },
+  text: { fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
 });
 
 // ─── Timing constants ─────────────────────────────────────────────────────────
-const LOG_STEP_DELAY  = 450;   // pause before non-HP log lines appear
-const HP_LOG_DELAY    = 300;   // pause before an HP-change log line appears
-const LOG_READ_DELAY  = 220;   // pause after log appears, before HP bar moves
-const HP_ANIM_WAIT    = 650;   // time for the HP bar animation to finish
-const POST_TURN_DELAY = 500;
+const LOG_STEP_DELAY  = 780;   // pause before non-HP log lines appear
+const HP_LOG_DELAY    = 520;   // pause before an HP-change log line appears
+const LOG_READ_DELAY  = 340;   // pause after log appears, before HP bar moves
+const HP_ANIM_WAIT    = 720;   // time for the HP bar animation to finish
+const POST_TURN_DELAY = 700;
+const MOVE_HOLD_DELAY  = 360;  // extra beat so the move name shows before its damage
 const LOG_FADE_MS     = 280;
 const FAINT_ANIM_MS   = 700;
 const SWITCH_IN_MS    = 500;
@@ -257,7 +248,7 @@ const fbS = StyleSheet.create({
   wrap: { flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'center', flex: 1 },
   weatherChip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(15,23,42,0.6)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, borderWidth: 1, borderColor: '#334155' },
   weatherTxt: { color: '#E2E8F0' },
-  weatherLabel: { color: '#94A3B8', fontWeight: '800', letterSpacing: 1 },
+  weatherLabel: { color: '#94A3B8', fontWeight: '600', letterSpacing: 1 },
   hazardTxt: { fontSize: 11 },
 });
 
@@ -289,9 +280,93 @@ const TopBar: React.FC<{
 const tbS = StyleSheet.create({
   bar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, backgroundColor: '#0f172a', borderBottomWidth: 2, borderBottomColor: '#334155' },
   turnBadge: { backgroundColor: '#1E293B', borderRadius: 4, paddingHorizontal: 8, paddingVertical: 2, borderWidth: 1, borderColor: '#334155' },
-  turnTxt: { color: '#F59E0B', fontWeight: '900', letterSpacing: 1 },
+  turnTxt: { color: '#F59E0B', fontWeight: '700', letterSpacing: 1 },
   timers: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  timeTxt: { color: '#94A3B8', fontWeight: '700', fontFamily: 'monospace' },
+  timeTxt: { color: '#94A3B8', fontWeight: '500', fontFamily: 'monospace' },
+});
+
+// ─── Move announcement banner (Showdown-style) ────────────────────────────────
+// Shows "<Pokémon> used <Move>!" front-and-center the moment a move resolves,
+// re-animating each time the text changes.
+const BANNER_MAX_LINES = 3; // recent narration lines kept per side
+type BannerEntry = { id: number; text: string };
+
+// One narration line — fades + slides in when it mounts (so only NEW lines animate).
+const BannerLine: React.FC<{ text: string; fontSize: number; dim: boolean }> = ({ text, fontSize, dim }) => {
+  const anim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(anim, { toValue: 1, duration: 220, useNativeDriver: true }).start();
+  }, []);
+  return (
+    <Animated.Text
+      numberOfLines={1}
+      style={[
+        bnrS.txt,
+        {
+          fontSize,
+          fontWeight: dim ? '500' : '700',
+          opacity: anim.interpolate({ inputRange: [0, 1], outputRange: [0, dim ? 0.5 : 1] }),
+          transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [9, 0] }) }],
+        },
+      ]}
+    >
+      {text}
+    </Animated.Text>
+  );
+};
+
+// Per-side narration banner — enemy sits up top, player down low, so each side's
+// events read near its own Pokémon instead of one big shared block. When it clears
+// it fades + slides out (staying mounted on its last lines until the exit finishes).
+const MoveBanner: React.FC<{ lines: BannerEntry[]; fontSize: number; placement: 'top' | 'bottom'; accent: string }> = ({ lines, fontSize, placement, accent }) => {
+  const fade = useRef(new Animated.Value(0)).current;
+  const [render, setRender] = useState<BannerEntry[]>(lines);
+
+  useEffect(() => {
+    if (lines.length > 0) {
+      setRender(lines);
+      Animated.timing(fade, { toValue: 1, duration: 160, useNativeDriver: true }).start();
+    } else {
+      Animated.timing(fade, { toValue: 0, duration: 260, useNativeDriver: true }).start(({ finished }) => {
+        if (finished) setRender([]); // only drop the stale lines once fully faded
+      });
+    }
+  }, [lines]);
+
+  if (render.length === 0) return null;
+  const shown = render.slice(-BANNER_MAX_LINES);
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        bnrS.wrap,
+        placement === 'top' ? bnrS.atTop : bnrS.atBottom,
+        { borderColor: accent, opacity: fade },
+      ]}
+    >
+      {shown.map((l, i) => (
+        <BannerLine key={l.id} text={l.text} fontSize={fontSize} dim={i !== shown.length - 1} />
+      ))}
+    </Animated.View>
+  );
+};
+const bnrS = StyleSheet.create({
+  wrap: {
+    position: 'absolute',
+    alignSelf: 'center',
+    maxWidth: '80%',
+    backgroundColor: 'rgba(15,23,42,0.92)',
+    borderWidth: 1.5,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    gap: 2,
+    zIndex: 50,
+    shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 6, shadowOffset: { width: 0, height: 2 },
+  },
+  atTop: { top: 8 },
+  atBottom: { bottom: 12 },
+  txt: { color: '#F8FAFC', letterSpacing: 0.5, textAlign: 'center' },
 });
 
 // ─── Animated HP bar fill ───────────────────────────────────────────────────────
@@ -394,18 +469,18 @@ const cS = StyleSheet.create({
   playerHud: { alignSelf: 'center', marginBottom: 10 },
   opponentHud: { alignSelf: 'center', marginBottom: 10 },
   nameRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
-  name: { color: '#F8FAFC', fontWeight: '800', marginRight: 6, letterSpacing: 0.3 },
-  level: { color: '#94A3B8', fontWeight: '600', marginRight: 6 },
+  name: { color: '#F8FAFC', fontWeight: '600', marginRight: 6, letterSpacing: 0.3 },
+  level: { color: '#94A3B8', fontWeight: '500', marginRight: 6 },
   statusBadge: { paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3 },
-  statusTxt: { color: '#FFF', fontSize: 8, fontWeight: 'bold' },
+  statusTxt: { color: '#FFF', fontSize: 8, fontWeight: '600' },
   hpContainer: { flexDirection: 'row', alignItems: 'center' },
   hpTrack: { flex: 1, height: 6, backgroundColor: '#475569', borderRadius: 3, overflow: 'hidden', marginRight: 6, position: 'relative' },
   hpFill: { height: '100%', borderRadius: 3 },
   hpTick: { position: 'absolute', top: 0, bottom: 0, width: 1, backgroundColor: 'rgba(15,23,42,0.5)' },
-  hpText: { color: '#CBD5E1', fontWeight: '600' },
+  hpText: { color: '#CBD5E1', fontWeight: '500' },
   statsContainer: { flexDirection: 'row', gap: 4, marginTop: 4, flexWrap: 'wrap' },
   statBadge: { paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3, borderWidth: 1 },
-  statTxt: { fontSize: 8, fontWeight: 'bold' },
+  statTxt: { fontSize: 8, fontWeight: '600' },
 });
 
 // ─── Team member mini-card for switch panel ───────────────────────────────────
@@ -472,20 +547,94 @@ const swS = StyleSheet.create({
   sprite:         { width: 36, height: 36 },
   info:           { flex: 1 },
   nameRow:        { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  name:           { color: '#F8FAFC', fontWeight: '800', fontSize: 13, flexShrink: 1 },
-  level:          { color: '#94A3B8', fontSize: 9, fontWeight: '700' },
+  name:           { color: '#F8FAFC', fontWeight: '600', fontSize: 13, flexShrink: 1 },
+  level:          { color: '#94A3B8', fontSize: 9, fontWeight: '500' },
   hpRow:          { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
   hpTrack:        { flex: 1, height: 6, backgroundColor: '#475569', borderRadius: 3, overflow: 'hidden', position: 'relative' },
   hpFill:         { height: '100%', borderRadius: 3 },
   hpTick:         { position: 'absolute', top: 0, bottom: 0, width: 1, backgroundColor: 'rgba(15,23,42,0.5)' },
-  hp:             { color: '#94A3B8', fontSize: 9, fontWeight: '700', fontFamily: 'monospace' },
+  hp:             { color: '#94A3B8', fontSize: 9, fontWeight: '500', fontFamily: 'monospace' },
   activeBadge:    { backgroundColor: '#00C3E3', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 'auto' },
-  activeBadgeTxt: { color: '#0F172A', fontSize: 8, fontWeight: '900' },
+  activeBadgeTxt: { color: '#0F172A', fontSize: 8, fontWeight: '700' },
   faintBadge:     { backgroundColor: '#EF4444', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 'auto' },
-  faintBadgeTxt:  { color: '#FFF', fontSize: 8, fontWeight: '900' },
+  faintBadgeTxt:  { color: '#FFF', fontSize: 8, fontWeight: '700' },
   movesRow:       { flexDirection: 'row', flexWrap: 'wrap', gap: 4, width: '100%' },
   moveBadge:      { flexBasis: '48%', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4, alignItems: 'center' },
-  moveTxt:        { color: '#FFF', fontSize: 8, fontWeight: '800', letterSpacing: 0.3 },
+  moveTxt:        { color: '#FFF', fontSize: 8, fontWeight: '600', letterSpacing: 0.3 },
+});
+
+// ─── Switch sheet — slides up from the bottom with a 3×2 team grid ─────────────
+const SwitchSheet: React.FC<{
+  visible: boolean;
+  forced: boolean;
+  team: BattlePokemon[];
+  activeIdx: number;
+  title: string;
+  onSelect: (idx: number) => void;
+  onClose: () => void;
+}> = ({ visible, forced, team, activeIdx, title, onSelect, onClose }) => {
+  const { height } = useWindowDimensions();
+  const slide = useRef(new Animated.Value(0)).current;
+  const [mounted, setMounted] = useState(visible);
+  const sheetHeight = Math.round(height * 0.84);
+
+  useEffect(() => {
+    if (visible) {
+      setMounted(true);
+      Animated.timing(slide, { toValue: 1, duration: 280, useNativeDriver: true }).start();
+    } else {
+      Animated.timing(slide, { toValue: 0, duration: 220, useNativeDriver: true }).start(({ finished }) => {
+        if (finished) setMounted(false);
+      });
+    }
+  }, [visible]);
+
+  if (!mounted) return null;
+  const translateY = slide.interpolate({ inputRange: [0, 1], outputRange: [sheetHeight, 0] });
+
+  return (
+    <>
+      <Animated.View
+        style={[shtS.backdrop, { opacity: slide.interpolate({ inputRange: [0, 1], outputRange: [0, 0.6] }) }]}
+        pointerEvents={visible ? 'auto' : 'none'}
+      >
+        {!forced && <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onClose} />}
+      </Animated.View>
+
+      <Animated.View style={[shtS.sheet, { height: sheetHeight, transform: [{ translateY }] }]}>
+        <View style={shtS.handle} />
+        <View style={shtS.header}>
+          <Text style={shtS.title}>{title}</Text>
+          {!forced && (
+            <TouchableOpacity onPress={onClose} style={{ padding: 6 }}>
+              <Text style={shtS.close}>✕</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+        <ScrollView contentContainerStyle={shtS.grid} showsVerticalScrollIndicator={false}>
+          {team.map((poke, idx) => {
+            if (forced && idx === activeIdx) return null;
+            return (
+              <SwitchCard key={poke.id} pokemon={poke} idx={idx} isActive={idx === activeIdx} cardWidth="31.5%" onPress={() => onSelect(idx)} />
+            );
+          })}
+        </ScrollView>
+      </Animated.View>
+    </>
+  );
+};
+const shtS = StyleSheet.create({
+  backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#000', zIndex: 90 },
+  sheet: {
+    position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 100,
+    backgroundColor: '#0F172A', borderTopWidth: 2, borderColor: '#00C3E3',
+    borderTopLeftRadius: 16, borderTopRightRadius: 16, paddingHorizontal: 14, paddingBottom: 14,
+  },
+  handle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: '#334155', marginTop: 8, marginBottom: 6 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  title: { color: '#F8FAFC', fontSize: 15, fontWeight: '700', letterSpacing: 1 },
+  close: { color: '#94A3B8', fontSize: 16, fontWeight: '600' },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', paddingVertical: 4 },
 });
 
 // ─── Move button ────────────────────────────────────────────────────────────
@@ -529,13 +678,13 @@ const mbS = StyleSheet.create({
   btn:       { flexBasis: '48%', flexGrow: 1, borderRadius: 8, padding: 8, justifyContent: 'space-between', elevation: 2, borderWidth: 2, borderColor: 'rgba(0,0,0,0.2)' },
   btnSelected: { borderColor: '#FFF', borderWidth: 2 },
   topRow:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  name:      { color: '#FFF', fontWeight: '900', flex: 1, textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 1, height: 1 }, textShadowRadius: 1 },
-  catGlyph:  { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '800', marginLeft: 4 },
+  name:      { color: '#FFF', fontWeight: '700', flex: 1, textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 1, height: 1 }, textShadowRadius: 1 },
+  catGlyph:  { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '600', marginLeft: 4 },
   bottomRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4, gap: 6 },
   typePill:  { backgroundColor: 'rgba(0,0,0,0.25)', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 2 },
-  typeTxt:   { color: '#FFF', fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
+  typeTxt:   { color: '#FFF', fontSize: 9, fontWeight: '600', letterSpacing: 0.5 },
   ppWrap:    { flex: 1, alignItems: 'flex-end' },
-  ppTxt:     { color: '#FFF', fontSize: 9, fontWeight: '700', textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 1, height: 1 }, textShadowRadius: 1 },
+  ppTxt:     { color: '#FFF', fontSize: 9, fontWeight: '500', textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 1, height: 1 }, textShadowRadius: 1 },
   ppTrack:   { width: '100%', height: 3, backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 2, marginTop: 2, overflow: 'hidden' },
   ppFill:    { height: '100%', borderRadius: 2 },
 });
@@ -550,8 +699,12 @@ export const BattleScreen: React.FC = () => {
     sendOutPlayerPokemon, field,
   } = useBattleStore();
 
-  const { height: winHeight } = useWindowDimensions();
-  const sizes = getSizes(winHeight < 500);
+  const { width: winWidth, height: winHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const sizes = getSizes(winWidth, winHeight);
+  // Full-width controls bar: two rows of move buttons + padding. Tall enough that
+  // both rows are fully visible (the moves fill it, so they never overflow).
+  const controlsHeight = Math.round(sizes.moveBtnMinHeight * 2.5 + 30);
 
   const [selectedMoveId, setSelectedMoveId] = useState<string | null>(null);
   const [isSwitchModalVisible, setSwitchModalVisible] = useState(false);
@@ -561,6 +714,9 @@ export const BattleScreen: React.FC = () => {
   const [displayPlayer, setDisplayPlayer]   = useState<BattlePokemon | null>(playerPokemon);
   const [displayOpp, setDisplayOpp]         = useState<BattlePokemon | null>(opponentPokemon);
   const [popups, setPopups]                 = useState<PopupData[]>([]);
+  const [playerBanner, setPlayerBanner]     = useState<BannerEntry[]>([]);
+  const [enemyBanner, setEnemyBanner]       = useState<BannerEntry[]>([]);
+  const bannerIdRef                         = useRef(0);
   const [totalTimer, setTotalTimer]         = useState(0);
   const [turnTimer, setTurnTimer]           = useState(0);
 
@@ -703,9 +859,13 @@ export const BattleScreen: React.FC = () => {
     const startIdx       = baseLogs.length;
     let currentVisible   = [...baseLogs];
     setNewFromIdx(startIdx);
+    setPlayerBanner([]);
+    setEnemyBanner([]);
 
     let lastDamagedTarget: 'player' | 'opponent' | null = null;
     let lastAttackedTarget: 'player' | 'opponent' | null = null;
+    // Which side's banner a name-less line (e.g. "It's super effective!") belongs to.
+    let lastBannerSide: 'player' | 'opponent' = 'player';
 
     // Track the active Pokémon's name/maxHp for log matching — these change
     // mid-loop when a switch occurs (voluntary or after a faint).
@@ -723,6 +883,18 @@ export const BattleScreen: React.FC = () => {
 
       currentVisible = [...currentVisible, line];
       setVisibleLogs([...currentVisible]);
+
+      // Route each narrated line to its side's banner (skip blank spacers).
+      if (line.trim().length > 0) {
+        let side: 'player' | 'opponent';
+        if (line.startsWith('You switched to') || line.startsWith(currentPlayerName)) side = 'player';
+        else if (line.startsWith('Opponent sent out') || line.startsWith(currentOppName)) side = 'opponent';
+        else side = lastBannerSide;
+        lastBannerSide = side;
+        const entry: BannerEntry = { id: ++bannerIdRef.current, text: line };
+        if (side === 'player') setPlayerBanner(prev => [...prev, entry]);
+        else setEnemyBanner(prev => [...prev, entry]);
+      }
 
       // Switch animation handling
       if (line.startsWith('You switched to ')) {
@@ -758,6 +930,9 @@ export const BattleScreen: React.FC = () => {
       if (line.includes('used')) {
         const attackerIsPlayer = line.startsWith(currentPlayerName);
         lastAttackedTarget = attackerIsPlayer ? 'opponent' : 'player';
+        // Let the move name sit on its own before the damage line replaces it
+        await sleep(MOVE_HOLD_DELAY);
+        if (cancelRef.current) break;
       }
 
       if (hurtOpponent(line, currentOppName)) lastDamagedTarget = 'opponent';
@@ -862,8 +1037,7 @@ export const BattleScreen: React.FC = () => {
           setDisplayOpp(prev => prev ? { ...prev, currentHp: runningOppHp } : prev);
           const delta = before - runningOppHp;
           if (delta > 0) {
-            const pct = Math.max(1, Math.round((delta / currentOppMaxHp) * 100));
-            setPopups(prev => [...prev, { id: Math.random().toString(), text: `TOOK ${pct}% DMG`, target: 'opponent', type: 'damage' }]);
+            setPopups(prev => [...prev, { id: Math.random().toString(), text: `-${delta} HP`, target: 'opponent', type: 'damage' }]);
           }
         } else if (hurtPlayer(line, currentPlayerName)) {
           const before = runningPlayerHp;
@@ -876,8 +1050,7 @@ export const BattleScreen: React.FC = () => {
           setDisplayPlayer(prev => prev ? { ...prev, currentHp: runningPlayerHp } : prev);
           const delta = before - runningPlayerHp;
           if (delta > 0) {
-            const pct = Math.max(1, Math.round((delta / currentPlayerMaxHp) * 100));
-            setPopups(prev => [...prev, { id: Math.random().toString(), text: `TOOK ${pct}% DMG`, target: 'player', type: 'damage' }]);
+            setPopups(prev => [...prev, { id: Math.random().toString(), text: `-${delta} HP`, target: 'player', type: 'damage' }]);
           }
         }
         if (line.includes('recovered HP') || line.includes('restored its HP')) {
@@ -887,8 +1060,7 @@ export const BattleScreen: React.FC = () => {
             setDisplayOpp(prev => prev ? { ...prev, currentHp: runningOppHp } : prev);
             const delta = runningOppHp - before;
             if (delta > 0) {
-              const pct = Math.max(1, Math.round((delta / currentOppMaxHp) * 100));
-              setPopups(prev => [...prev, { id: Math.random().toString(), text: `RESTORED ${pct}% HP`, target: 'opponent', type: 'heal' }]);
+              setPopups(prev => [...prev, { id: Math.random().toString(), text: `+${delta} HP`, target: 'opponent', type: 'heal' }]);
             }
           }
           if (line.startsWith(currentPlayerName + ' recovered') || line.startsWith(currentPlayerName + ' restored')) {
@@ -897,8 +1069,7 @@ export const BattleScreen: React.FC = () => {
             setDisplayPlayer(prev => prev ? { ...prev, currentHp: runningPlayerHp } : prev);
             const delta = runningPlayerHp - before;
             if (delta > 0) {
-              const pct = Math.max(1, Math.round((delta / currentPlayerMaxHp) * 100));
-              setPopups(prev => [...prev, { id: Math.random().toString(), text: `RESTORED ${pct}% HP`, target: 'player', type: 'heal' }]);
+              setPopups(prev => [...prev, { id: Math.random().toString(), text: `+${delta} HP`, target: 'player', type: 'heal' }]);
             }
           }
         }
@@ -916,6 +1087,8 @@ export const BattleScreen: React.FC = () => {
     }
 
     await sleep(POST_TURN_DELAY);
+    setPlayerBanner([]);
+    setEnemyBanner([]);
     if (!cancelRef.current) applyPendingTurn();
     setIsAnimating(false);
     isAnimatingRef.current = false;
@@ -995,141 +1168,127 @@ export const BattleScreen: React.FC = () => {
 
   return (
     <View style={s.safeArea}>
-      <View style={s.root}>
+      <View style={[s.root, { paddingTop: insets.top, paddingBottom: insets.bottom, paddingLeft: insets.left, paddingRight: insets.right }]}>
 
-        <View style={s.leftColumn}>
-          {/* ═══════════ TOP BAR ═══════════ */}
-          <TopBar
-            turnCount={turnCount}
-            totalTimer={totalTimer}
-            turnTimer={turnTimer}
-            fmtTime={fmtTime}
-            weather={field.weather}
-            playerHazards={field.player.hazards}
-            opponentHazards={field.opponent.hazards}
-            playerScreens={field.player.screens}
-            opponentScreens={field.opponent.screens}
-            sizes={sizes}
-          />
+        {/* ═══════════ TOP: battle scene (left) + log (right) ═══════════ */}
+        <View style={s.topRow}>
+          <View style={s.battleColumn}>
+            <TopBar
+              turnCount={turnCount}
+              totalTimer={totalTimer}
+              turnTimer={turnTimer}
+              fmtTime={fmtTime}
+              weather={field.weather}
+              playerHazards={field.player.hazards}
+              opponentHazards={field.opponent.hazards}
+              playerScreens={field.player.screens}
+              opponentScreens={field.opponent.screens}
+              sizes={sizes}
+            />
 
-          {/* ═══════════ BATTLE SCENE ═══════════ */}
-          <View style={[s.arena, { flex: sizes.arenaFlex }]}>
-            <Image source={{ uri: 'https://play.pokemonshowdown.com/sprites/battlebg/bg-forest.jpg' }} style={s.arenaBg} />
-            <View style={s.arenaVignette} />
+            <View style={[s.arena, { flex: 1 }]}>
+              <Image source={{ uri: 'https://play.pokemonshowdown.com/sprites/battlebg/bg-forest.jpg' }} style={s.arenaBg} />
+              <View style={s.arenaVignette} />
 
-            <View style={s.enemyHalf}>
-              <BattleInfoCard pokemon={dopp} isPlayer={false} team={opponentBattleTeam} activeIdx={opponentActiveIdx} sizes={sizes} />
-              <View style={s.spriteWrapEnemy}>
-                <View style={[s.baseShadow, { width: sizes.enemySprite * 0.7 }]} />
-                <Animated.Image source={oppSprite} style={[{ width: sizes.enemySprite, height: sizes.enemySprite, zIndex: 2 }, { opacity: oppSpriteOpacity, transform: [{ translateX: oppSpriteX }] }]} resizeMode="contain" />
-                {popups.filter(p => p.target === 'opponent').map(p => (
-                  <PopupAnimation key={p.id} popup={p} onComplete={id => setPopups(curr => curr.filter(x => x.id !== id))} />
-                ))}
+              {/* Showdown-style narration banners — enemy up top, player down low */}
+              <MoveBanner lines={enemyBanner}  fontSize={sizes.topBarFont + 4} placement="top"    accent="#EF4444" />
+              <MoveBanner lines={playerBanner} fontSize={sizes.topBarFont + 4} placement="bottom" accent="#00C3E3" />
+
+              <View style={s.enemyHalf}>
+                <BattleInfoCard pokemon={dopp} isPlayer={false} team={opponentBattleTeam} activeIdx={opponentActiveIdx} sizes={sizes} />
+                <View style={s.spriteWrapEnemy}>
+                  <View style={[s.baseShadow, { width: sizes.enemySprite * 0.7 }]} />
+                  <Animated.Image source={oppSprite} style={[{ width: sizes.enemySprite, height: sizes.enemySprite, zIndex: 2 }, { opacity: oppSpriteOpacity, transform: [{ translateX: oppSpriteX }] }]} resizeMode="contain" />
+                  {popups.filter(p => p.target === 'opponent').map(p => (
+                    <PopupAnimation key={p.id} popup={p} onComplete={id => setPopups(curr => curr.filter(x => x.id !== id))} />
+                  ))}
+                </View>
               </View>
-            </View>
 
-            <View style={s.playerHalf}>
-              <BattleInfoCard pokemon={dp} isPlayer={true} team={playerBattleTeam} activeIdx={playerActiveIdx} sizes={sizes} />
-              <View style={s.spriteWrapPlayer}>
-                <View style={[s.baseShadow, { width: sizes.playerSprite * 0.7 }]} />
-                <Animated.Image source={playerSprite} style={[{ width: sizes.playerSprite, height: sizes.playerSprite, zIndex: 2 }, { opacity: playerSpriteOpacity, transform: [{ translateX: playerSpriteX }] }]} resizeMode="contain" />
-                {popups.filter(p => p.target === 'player').map(p => (
-                  <PopupAnimation key={p.id} popup={p} onComplete={id => setPopups(curr => curr.filter(x => x.id !== id))} />
-                ))}
+              <View style={s.playerHalf}>
+                <BattleInfoCard pokemon={dp} isPlayer={true} team={playerBattleTeam} activeIdx={playerActiveIdx} sizes={sizes} />
+                <View style={s.spriteWrapPlayer}>
+                  <View style={[s.baseShadow, { width: sizes.playerSprite * 0.7 }]} />
+                  <Animated.Image source={playerSprite} style={[{ width: sizes.playerSprite, height: sizes.playerSprite, zIndex: 2 }, { opacity: playerSpriteOpacity, transform: [{ translateX: playerSpriteX }] }]} resizeMode="contain" />
+                  {popups.filter(p => p.target === 'player').map(p => (
+                    <PopupAnimation key={p.id} popup={p} onComplete={id => setPopups(curr => curr.filter(x => x.id !== id))} />
+                  ))}
+                </View>
               </View>
             </View>
           </View>
 
-          {/* ═══════════ CONTROLS PANEL ═══════════ */}
-          <View style={[s.controlsPanel, { flex: sizes.controlsFlex }]}>
-            {!isForcedSwitch && (
-              <View style={s.controlsInner}>
-                <View style={s.movesGrid}>
-                  {playerPokemon.moves.map(move => {
-                    const isSelected = selectedMoveId === move.id || (playerPokemon.lockedMove && move.id === playerPokemon.lockedMove.moveId);
-                    const isLockedOut = (!!playerPokemon.lockedMove && move.id !== playerPokemon.lockedMove.moveId)
-                      || (move.currentPp ?? move.pp) <= 0;
-                    return (
-                      <MoveButton
-                        key={move.id}
-                        move={move}
-                        isSelected={!!isSelected}
-                        isLockedOut={isLockedOut}
-                        disabled={isAnimating}
-                        sizes={sizes}
-                        onPress={() => {
-                          if (canFight && selectedMoveId === move.id) handleFight();
-                          else setSelectedMoveId(move.id);
-                        }}
-                      />
-                    );
-                  })}
-                </View>
+          <View style={[s.logColumn, { flex: 1 }]}>
+            <View style={s.logPanel}>
+              <View style={s.logHeader}><Text style={s.logHeaderTxt}>Battle Log</Text></View>
+              <ScrollView ref={scrollRef} style={s.logScroll} contentContainerStyle={s.logContent} showsVerticalScrollIndicator={false}>
+                {visibleLogs.map((line, idx) => (
+                  <AnimatedLogLine key={`${idx}-${line}`} text={line || ' '} textStyle={[logS.base, { fontSize: sizes.logFont }, getLogStyle(line)]} isNew={idx >= newFromIdx} />
+                ))}
+                {isAnimating && <Animated.Text style={logS.cursor}>▌</Animated.Text>}
+              </ScrollView>
+            </View>
+          </View>
+        </View>
 
-                <View style={[s.actionRow, { height: sizes.actionRowHeight }]}>
-                  {selectedMoveId ? (
-                    <TouchableOpacity style={[s.actionBtn, s.actionCancel]} onPress={() => setSelectedMoveId(null)} disabled={isAnimating}>
-                      <Text style={s.actionBtnTxt}>Cancel</Text>
-                    </TouchableOpacity>
-                  ) : (
-                    <>
-                      <TouchableOpacity style={[s.actionBtn, s.actionSwitch]} onPress={() => setSwitchModalVisible(true)} disabled={isAnimating || !!playerPokemon.lockedMove}>
-                        <Text style={s.actionBtnTxt}>Pokémon</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity style={[s.actionBtn, s.actionRun]} onPress={handleFlee} disabled={isAnimating || !!playerPokemon.lockedMove}>
-                        <Text style={s.actionBtnTxt}>Run</Text>
-                      </TouchableOpacity>
-                    </>
-                  )}
-                </View>
+        {/* ═══════════ BOTTOM: full-width controls (moves 2×2 + actions) ═══════════ */}
+        <View style={[s.bottomBar, { height: controlsHeight }]}>
+          <View style={s.movesArea}>
+            {[0, 2].map(start => (
+              <View key={start} style={s.movesRow}>
+                {playerPokemon.moves.slice(start, start + 2).map(move => {
+                  const isSelected = selectedMoveId === move.id || (playerPokemon.lockedMove && move.id === playerPokemon.lockedMove.moveId);
+                  const isLockedOut = (!!playerPokemon.lockedMove && move.id !== playerPokemon.lockedMove.moveId)
+                    || (move.currentPp ?? move.pp) <= 0;
+                  return (
+                    <MoveButton
+                      key={move.id}
+                      move={move}
+                      isSelected={!!isSelected}
+                      isLockedOut={isLockedOut}
+                      disabled={isAnimating}
+                      sizes={sizes}
+                      onPress={() => {
+                        if (canFight && selectedMoveId === move.id) handleFight();
+                        else setSelectedMoveId(move.id);
+                      }}
+                    />
+                  );
+                })}
               </View>
+            ))}
+          </View>
+
+          <View style={s.actionArea}>
+            {selectedMoveId ? (
+              <TouchableOpacity style={[s.actionBtn, s.actionCancel, { flex: 1 }]} onPress={() => setSelectedMoveId(null)} disabled={isAnimating}>
+                <Text style={s.actionBtnTxt}>Cancel</Text>
+              </TouchableOpacity>
+            ) : (
+              <>
+                <TouchableOpacity style={[s.actionBtn, s.actionSwitch, { flex: 1 }]} onPress={() => setSwitchModalVisible(true)} disabled={isAnimating || !!playerPokemon.lockedMove}>
+                  <Text style={s.actionBtnTxt}>Pokémon</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[s.actionBtn, s.actionRun, { flex: 1 }]} onPress={handleFlee} disabled={isAnimating || !!playerPokemon.lockedMove}>
+                  <Text style={s.actionBtnTxt}>Run</Text>
+                </TouchableOpacity>
+              </>
             )}
           </View>
         </View>
 
-        <View style={s.rightColumn}>
-          {/* ═══════════ BATTLE LOG ═══════════ */}
-          <View style={s.logPanel}>
-            <View style={s.logHeader}><Text style={s.logHeaderTxt}>Battle Log</Text></View>
-            <ScrollView ref={scrollRef} style={s.logScroll} contentContainerStyle={s.logContent} showsVerticalScrollIndicator={false}>
-              {visibleLogs.map((line, idx) => (
-                <AnimatedLogLine key={`${idx}-${line}`} text={line || ' '} textStyle={[logS.base, { fontSize: sizes.logFont }, getLogStyle(line)]} isNew={idx >= newFromIdx} />
-              ))}
-              {isAnimating && <Animated.Text style={logS.cursor}>▌</Animated.Text>}
-            </ScrollView>
-          </View>
-        </View>
-
-        {/* ═══════════ SWITCH MODAL ═══════════ */}
-        <Modal visible={isForcedSwitch || isSwitchModalVisible} transparent animationType="fade">
-          <View style={ms.overlay}>
-            <View style={ms.sheet}>
-              <View style={ms.headerAccent} />
-              <View style={ms.header}>
-                <View style={{ flex: 1 }}>
-                  <Text style={ms.title}>
-                    {isForcedSwitch
-                      ? ((playerPokemon?.currentHp ?? 0) <= 0 ? 'YOUR POKÉMON FAINTED!' : 'YOUR POKÉMON WAS DRAGGED OUT!')
-                      : 'SWITCH POKÉMON'}
-                  </Text>
-                </View>
-                {!isForcedSwitch && (
-                  <TouchableOpacity onPress={() => setSwitchModalVisible(false)} style={{ padding: 5 }}>
-                    <Text style={{ color: '#94A3B8', fontSize: 16, fontWeight: 'bold' }}>✕</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-              <ScrollView style={ms.list} contentContainerStyle={ms.listContent} showsVerticalScrollIndicator={false}>
-                {playerBattleTeam.map((poke, idx) => {
-                  if (isForcedSwitch && idx === playerActiveIdx) return null;
-                  return (
-                    <SwitchCard key={poke.id} pokemon={poke} idx={idx} isActive={idx === playerActiveIdx} cardWidth={sizes.switchCardWidth} onPress={() => isForcedSwitch ? handleForcedSwitch(idx) : handleVoluntarySwitch(idx)} />
-                  );
-                })}
-              </ScrollView>
-            </View>
-          </View>
-        </Modal>
+        {/* ═══════════ SWITCH SHEET (slides up) ═══════════ */}
+        <SwitchSheet
+          visible={isForcedSwitch || isSwitchModalVisible}
+          forced={isForcedSwitch}
+          team={playerBattleTeam}
+          activeIdx={playerActiveIdx}
+          title={isForcedSwitch
+            ? ((playerPokemon?.currentHp ?? 0) <= 0 ? 'YOUR POKÉMON FAINTED!' : 'YOUR POKÉMON WAS DRAGGED OUT!')
+            : 'SWITCH POKÉMON'}
+          onSelect={(idx) => isForcedSwitch ? handleForcedSwitch(idx) : handleVoluntarySwitch(idx)}
+          onClose={() => setSwitchModalVisible(false)}
+        />
 
       </View>
     </View>
@@ -1140,14 +1299,14 @@ export const BattleScreen: React.FC = () => {
 const logS = StyleSheet.create({
   base:    { fontSize: 10, fontFamily: 'monospace', lineHeight: 14, marginVertical: 0.5 },
   normal:  { color: '#94A3B8' },
-  turn:    { color: '#F59E0B', fontWeight: '800', marginTop: 4 },
-  move:    { color: '#E2E8F0', fontWeight: '700' },
-  damage:  { color: '#CBD5E1', fontWeight: '600' },
-  super:   { color: '#10B981', fontWeight: '700' },
-  weak:    { color: '#F59E0B', fontWeight: '600' },
-  faint:   { color: '#EF4444', fontWeight: '700' },
-  event:   { color: '#00C3E3', fontWeight: '700' },
-  win:     { color: '#3B82F6', fontWeight: '800' },
+  turn:    { color: '#F59E0B', fontWeight: '600', marginTop: 4 },
+  move:    { color: '#E2E8F0', fontWeight: '500' },
+  damage:  { color: '#CBD5E1', fontWeight: '500' },
+  super:   { color: '#10B981', fontWeight: '500' },
+  weak:    { color: '#F59E0B', fontWeight: '500' },
+  faint:   { color: '#EF4444', fontWeight: '500' },
+  event:   { color: '#00C3E3', fontWeight: '500' },
+  win:     { color: '#3B82F6', fontWeight: '600' },
   divider: { color: '#334155' },
   cursor:  { color: '#00C3E3', fontSize: 12 },
 });
@@ -1155,10 +1314,12 @@ const logS = StyleSheet.create({
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#0f172a' },
-  root:     { flex: 1, flexDirection: 'row' },
+  root:     { flex: 1, flexDirection: 'column' },
 
-  leftColumn: { flex: 7, flexDirection: 'column' },
-  rightColumn: { flex: 3, flexDirection: 'column', borderLeftWidth: 2, borderLeftColor: '#334155' },
+  // Top region: battle scene + log side by side
+  topRow:       { flex: 1, flexDirection: 'row' },
+  battleColumn: { flex: 3.4, flexDirection: 'column' },
+  logColumn:    { flexDirection: 'column', borderLeftWidth: 2, borderLeftColor: '#334155' },
 
   // Arena
   arena: { flex: 6, position: 'relative', overflow: 'hidden', backgroundColor: '#8ea679' },
@@ -1173,30 +1334,30 @@ const s = StyleSheet.create({
 
   baseShadow: { position: 'absolute', bottom: 0, height: 16, backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 50, transform: [{ scaleX: 1.4 }], zIndex: 1 },
 
-  // Controls Panel
-  controlsPanel: { flex: 4, backgroundColor: '#1e293b', borderTopWidth: 2, borderTopColor: '#334155' },
-  controlsInner: { flex: 1, padding: 8, justifyContent: 'space-between' },
-  movesGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, flex: 1 },
+  // Full-width controls bar (moves 2×2 on the left, actions stacked on the right)
+  bottomBar:  { flexDirection: 'row', backgroundColor: '#1e293b', borderTopWidth: 2, borderTopColor: '#334155', padding: 8, gap: 8 },
+  movesArea:  { flex: 3.4, gap: 6 },
+  movesRow:   { flex: 1, flexDirection: 'row', gap: 6 },
+  actionArea: { flex: 1, gap: 6 },
 
-  actionRow: { flexDirection: 'row', gap: 6, marginTop: 6 },
-  actionBtn: { flex: 1, borderRadius: 6, justifyContent: 'center', alignItems: 'center' },
+  actionBtn: { borderRadius: 6, justifyContent: 'center', alignItems: 'center' },
   actionSwitch: { backgroundColor: '#3b82f6' },
   actionRun: { backgroundColor: '#64748b' },
   actionCancel: { backgroundColor: '#ef4444' },
-  actionBtnTxt: { color: '#FFF', fontWeight: 'bold', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1 },
+  actionBtnTxt: { color: '#FFF', fontWeight: '600', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1 },
 
   // Battle Log
   logPanel: { flex: 1, backgroundColor: '#020617' },
   logHeader: { paddingVertical: 8, backgroundColor: '#0f172a', borderBottomWidth: 1, borderBottomColor: '#1e293b', alignItems: 'center' },
-  logHeaderTxt: { color: '#94A3B8', fontSize: 11, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 1 },
+  logHeaderTxt: { color: '#94A3B8', fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1 },
   logScroll: { flex: 1 },
   logContent: { padding: 8, flexGrow: 1, paddingBottom: 20 },
 
   // Error
   errorWrap:  { flex: 1, backgroundColor: '#0F172A', justifyContent: 'center', alignItems: 'center' },
-  errorTxt:   { color: '#EF4444', fontSize: 16, fontWeight: 'bold', marginBottom: 12 },
+  errorTxt:   { color: '#EF4444', fontSize: 16, fontWeight: '600', marginBottom: 12 },
   errorBtn:   { backgroundColor: '#3B82F6', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 },
-  errorBtnTxt:{ color: '#FFF', fontWeight: '800' },
+  errorBtnTxt:{ color: '#FFF', fontWeight: '600' },
 });
 
 // ─── Forced switch modal styles ───────────────────────────────────────────────
@@ -1208,7 +1369,7 @@ const ms = StyleSheet.create({
   },
   headerAccent: { height: 4, backgroundColor: '#00C3E3' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 14, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: '#1E293B' },
-  title:    { color: '#F8FAFC', fontSize: 16, fontWeight: '900', letterSpacing: 1.5 },
+  title:    { color: '#F8FAFC', fontSize: 16, fontWeight: '700', letterSpacing: 1.5 },
   subtitle: { color: '#94A3B8', fontSize: 11, textAlign: 'center', marginTop: 6, marginBottom: 14 },
   list:     { flexGrow: 0, padding: 16 },
   listContent: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' },

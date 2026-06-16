@@ -76,7 +76,7 @@ const styles = StyleSheet.create({
   },
   hpLabel: {
     fontSize: 12,
-    fontWeight: 'bold',
+    fontWeight: '600',
     color: '#121212',
     backgroundColor: '#F59E0B',
     paddingHorizontal: 4,
@@ -86,7 +86,7 @@ const styles = StyleSheet.create({
   },
   hpText: {
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#E5E7EB',
     fontFamily: 'monospace',
   },

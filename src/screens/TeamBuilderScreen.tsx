@@ -521,13 +521,13 @@ const styles = StyleSheet.create({
   },
   backButtonText: {
     color: '#FFFFFF',
-    fontWeight: '800',
+    fontWeight: '600',
     fontSize: 11,
     letterSpacing: 1,
   },
   formatLabel: {
     color: '#00C3E3',
-    fontWeight: '700',
+    fontWeight: '500',
     fontSize: 11,
     letterSpacing: 1,
   },
@@ -542,7 +542,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     color: '#FFFFFF',
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
     paddingHorizontal: 10,
     paddingVertical: 5,
     textAlign: 'center',
@@ -568,7 +568,7 @@ const styles = StyleSheet.create({
   loadoutTabText: {
     color: '#94A3B8',
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   loadoutTabTextActive: {
     color: '#0F172A',
@@ -585,7 +585,7 @@ const styles = StyleSheet.create({
   },
   saveBtnText: {
     color: '#FFFFFF',
-    fontWeight: '800',
+    fontWeight: '600',
     fontSize: 11,
   },
   newBtn: {
@@ -598,7 +598,7 @@ const styles = StyleSheet.create({
   },
   newBtnText: {
     color: '#FFFFFF',
-    fontWeight: '800',
+    fontWeight: '600',
     fontSize: 16,
   },
   deleteBtn: {
@@ -611,7 +611,7 @@ const styles = StyleSheet.create({
   },
   deleteBtnText: {
     color: '#FFFFFF',
-    fontWeight: '800',
+    fontWeight: '600',
     fontSize: 16,
   },
   cardsRow: {
@@ -643,7 +643,7 @@ const styles = StyleSheet.create({
   },
   slotLabel: {
     color: '#F8FAFC',
-    fontWeight: '800',
+    fontWeight: '600',
     fontSize: 12,
   },
   legalityBadge: {
@@ -654,7 +654,7 @@ const styles = StyleSheet.create({
   legalityBadgeText: {
     color: '#FFFFFF',
     fontSize: 8,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   speciesContainer: {
     marginBottom: 8,
@@ -662,7 +662,7 @@ const styles = StyleSheet.create({
   fieldLabel: {
     color: '#64748B',
     fontSize: 8,
-    fontWeight: '800',
+    fontWeight: '600',
     letterSpacing: 1,
     marginBottom: 4,
   },
@@ -686,7 +686,7 @@ const styles = StyleSheet.create({
   speciesOptionText: {
     color: '#64748B',
     fontSize: 9,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   speciesOptionTextActive: {
     color: '#F8FAFC',
@@ -712,7 +712,7 @@ const styles = StyleSheet.create({
   levelBtnText: {
     color: '#F8FAFC',
     fontSize: 9,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   levelValueWrapper: {
     flex: 1,
@@ -720,7 +720,7 @@ const styles = StyleSheet.create({
   },
   levelValue: {
     color: '#00C3E3',
-    fontWeight: '900',
+    fontWeight: '700',
     fontSize: 13,
   },
   abilityContainer: {
@@ -744,7 +744,7 @@ const styles = StyleSheet.create({
   moveNameText: {
     color: '#F8FAFC',
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '500',
   },
   moveBadge: {
     paddingHorizontal: 6,
@@ -754,7 +754,7 @@ const styles = StyleSheet.create({
   moveBadgeText: {
     color: '#FFFFFF',
     fontSize: 8,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   issuesList: {
     maxHeight: 70,
@@ -766,7 +766,7 @@ const styles = StyleSheet.create({
   issueText: {
     color: '#F87171',
     fontSize: 9,
-    fontWeight: '600',
+    fontWeight: '500',
     marginVertical: 1,
   },
   // Modal Styles
@@ -787,7 +787,7 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     fontSize: 16,
-    fontWeight: '900',
+    fontWeight: '700',
     color: '#F8FAFC',
     letterSpacing: 1.5,
     textAlign: 'center',
@@ -811,13 +811,13 @@ const styles = StyleSheet.create({
   },
   modalMoveName: {
     color: '#F8FAFC',
-    fontWeight: '800',
+    fontWeight: '600',
     fontSize: 13,
   },
   modalMoveDesc: {
     color: '#64748B',
     fontSize: 9,
-    fontWeight: '500',
+    fontWeight: '400',
   },
   closeModalBtn: {
     backgroundColor: '#334155',
@@ -828,7 +828,7 @@ const styles = StyleSheet.create({
   },
   closeModalBtnText: {
     color: '#FFFFFF',
-    fontWeight: '800',
+    fontWeight: '600',
     fontSize: 12,
   },
 });

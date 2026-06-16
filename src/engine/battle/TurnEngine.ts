@@ -430,6 +430,15 @@ function performMove(side: Side, other: Side, move: Move, field: FieldState, log
     return;
   }
 
+  // ── Protect / Detect — block any move aimed at the protected target ───────
+  // (All damaging moves target the foe; status moves only if they do.)
+  if (defender.volatileStatuses.includes('Protected') &&
+      (move.category !== 'Status' || move.effect?.target === 'opponent')) {
+    logs.push(`${defender.name} protected itself!`);
+    if (move.flags?.selfDestruct) attacker.currentHp = 0;
+    return;
+  }
+
   // ── Status category moves ────────────────────────────────────────────────
   if (move.category === 'Status') {
     if (!checkMoveHit(move, attacker, defender, rng, weather)) {

@@ -173,7 +173,8 @@ function applyDelayedAttack(side: SideState, active: BattlePokemon, logs: string
 // Turn-scoped volatiles — Flinch only lasts for the turn it was inflicted.
 // ─────────────────────────────────────────────────────────────────────────────
 function clearTurnVolatiles(poke: BattlePokemon): void {
-  if (poke.volatileStatuses.includes('Flinch')) {
-    poke.volatileStatuses = poke.volatileStatuses.filter(s => s !== 'Flinch');
-  }
+  // Flinch, Protect and Endure only last for the turn they were applied.
+  poke.volatileStatuses = poke.volatileStatuses.filter(
+    s => s !== 'Flinch' && s !== 'Protected' && s !== 'Enduring',
+  );
 }
