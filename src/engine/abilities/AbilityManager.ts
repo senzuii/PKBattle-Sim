@@ -1,13 +1,41 @@
-import { BattlePokemon, Move, MoveEffect, NonVolatileStatus, VolatileStatus } from '../../types/Pokemon';
+import { BattlePokemon, Move, MoveEffect, NonVolatileStatus, VolatileStatus, StatStages, WeatherKind } from '../../types/Pokemon';
 import { ABILITIES } from '../../data/abilities';
+import { FieldState } from '../battle/Field';
+
+// Abilities that set weather the moment their holder enters the field.
+const WEATHER_ON_ENTRY: Record<string, WeatherKind> = {
+  'Drizzle': 'Rain',
+  'Drought': 'Sun',
+  'Sand Stream': 'Sandstorm',
+  'Snow Warning': 'Hail',
+};
+const WEATHER_START_MSG: Record<WeatherKind, string> = {
+  Rain: 'It started to rain!',
+  Sun: 'The sunlight turned harsh!',
+  Sandstorm: 'A sandstorm kicked up!',
+  Hail: 'It started to hail!',
+};
 
 /**
  * Dispatches all ability hooks to the data-driven ABILITIES registry.
  * To add a new ability, add an entry to src/data/abilities/list/ and export it from src/data/abilities.ts.
  */
 export const AbilityManager = {
-  onSwitchIn: (pokemon: BattlePokemon, opponent: BattlePokemon, logs: string[]) => {
+  onSwitchIn: (pokemon: BattlePokemon, opponent: BattlePokemon, logs: string[], field?: FieldState) => {
     ABILITIES[pokemon.ability]?.onSwitchIn?.(pokemon, opponent, logs);
+
+    // Weather-setting abilities (Drizzle, Drought, …) — Gen 3: stays until changed.
+    const w = WEATHER_ON_ENTRY[pokemon.ability];
+    if (w && field && field.weather?.kind !== w) {
+      field.weather = { kind: w, turnsLeft: 9999 };
+      logs.push(`[${pokemon.name}'s ${pokemon.ability}]`);
+      logs.push(WEATHER_START_MSG[w]);
+    }
+  },
+
+  /** False when a foe-inflicted drop of `stat` is blocked (Clear Body, Hyper Cutter…). */
+  canLowerStat: (pokemon: BattlePokemon, stat: keyof StatStages): boolean => {
+    return ABILITIES[pokemon.ability]?.canLowerStat?.(pokemon, stat) ?? true;
   },
 
   getSpeedMultiplier: (pokemon: BattlePokemon, weather?: string): number => {

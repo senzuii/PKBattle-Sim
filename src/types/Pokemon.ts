@@ -3,7 +3,16 @@ export type PokeType = 'Bug' | 'Dark' | 'Dragon' | 'Electric' | 'Fairy' | 'Fight
 export type MoveCategory = 'Physical' | 'Special' | 'Status';
 
 export type NonVolatileStatus = 'Burn' | 'Freeze' | 'Paralysis' | 'Poison' | 'Toxic' | 'Sleep';
-export type VolatileStatus = 'Confusion' | 'Flinch' | 'Protected' | 'Enduring';
+export type VolatileStatus = 'Confusion' | 'Flinch' | 'Protected' | 'Enduring' | 'Infatuation';
+
+export type Gender = 'M' | 'F' | 'N';
+
+export type Nature =
+  | 'Hardy' | 'Lonely' | 'Brave' | 'Adamant' | 'Naughty'
+  | 'Bold' | 'Docile' | 'Relaxed' | 'Impish' | 'Lax'
+  | 'Timid' | 'Hasty' | 'Serious' | 'Jolly' | 'Naive'
+  | 'Modest' | 'Mild' | 'Quiet' | 'Bashful' | 'Rash'
+  | 'Calm' | 'Gentle' | 'Sassy' | 'Careful' | 'Quirky';
 
 export type WeatherKind = 'Sun' | 'Rain' | 'Sandstorm' | 'Hail';
 export type HazardKind = 'stealthrock' | 'spikes' | 'toxicspikes';
@@ -12,7 +21,7 @@ export type ScreenKind = 'reflect' | 'lightscreen';
 
 export interface MoveEffect {
   type: 'stat_change' | 'leech_seed' | 'transform' | 'status' | 'volatile_status' | 'heal' | 'drain' | 'recoil' | 'fixed_damage'
-      | 'weather' | 'hazard' | 'delayed_damage' | 'wish' | 'screen' | 'force_switch';
+      | 'weather' | 'hazard' | 'delayed_damage' | 'wish' | 'screen' | 'force_switch' | 'trap';
   target: 'self' | 'opponent';
   stat?: 'atk' | 'def' | 'spa' | 'spd' | 'spe' | 'accuracy' | 'evasion';
   stages?: number; // e.g., -1 to lower, +1 to raise
@@ -83,6 +92,7 @@ export interface CustomPokemon {
   moves: string[]; // array of up to 4 move IDs
   ivs: Stats;
   evs: Stats;
+  nature?: Nature;
   heldItem?: string;
 }
 
@@ -91,6 +101,8 @@ export interface BattlePokemon {
   baseId: string; // bulbasaur, charmander, squirtle
   name: string;
   types: PokeType[];
+  gender?: Gender;
+  nature?: Nature;
   level: number;
   ability: string;
   ivs: Stats;
@@ -118,6 +130,11 @@ export interface BattlePokemon {
   moves: Move[];
   lastMoveUsed?: string; // moveId of the last move this Pokémon used (for Mimic)
   mimicBackup?: { index: number; move: Move }; // original move slot replaced by Mimic, restored on switch-out
+  trap?: { turnsLeft: number; moveName: string }; // Wrap/Bind/etc. — can't switch, chip damage each turn
+  taunted?: number;                               // Taunt: turns left where status moves are blocked
+  disabled?: { moveId: string; turnsLeft: number }; // Disable: a move that can't be used
+  encore?: { moveId: string; turnsLeft: number };   // Encore: forced to repeat this move
+  torment?: boolean;                              // Torment: can't use the same move twice in a row
 }
 
 export type BattleDifficulty = 'easy' | 'medium' | 'hard' | 'cheating';
@@ -144,6 +161,8 @@ export interface Ability {
   onContactHit?: (attacker: BattlePokemon, defender: BattlePokemon, move: Move, logs: string[]) => void;
   onEndOfTurn?: (pokemon: BattlePokemon, logs: string[]) => void;
   canApplyStatus?: (pokemon: BattlePokemon, status: NonVolatileStatus | VolatileStatus) => boolean;
+  /** Returns false to block a foe-inflicted drop of the given stat (Clear Body, Hyper Cutter…). */
+  canLowerStat?: (pokemon: BattlePokemon, stat: keyof StatStages) => boolean;
   /**
    * Adjusts the proc chance of chance-based move effects.
    * role 'attacker': the ability holder is using the move (Serene Grace).

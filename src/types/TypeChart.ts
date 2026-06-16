@@ -30,9 +30,20 @@ export const TYPE_CHART: EffectivenessChart = {
 /**
  * Calculates type effectiveness multiplier of a move type against a target's types.
  */
-export function getEffectiveness(moveType: PokeType, targetTypes: PokeType[]): number {
+export function getEffectiveness(
+  moveType: PokeType,
+  targetTypes: PokeType[],
+  ignoreGhostImmunity = false, // Scrappy: Normal/Fighting hit Ghost normally
+): number {
   let multiplier = 1.0;
   for (const targetType of targetTypes) {
+    if (
+      ignoreGhostImmunity &&
+      targetType === 'Ghost' &&
+      (moveType === 'Normal' || moveType === 'Fighting')
+    ) {
+      continue; // treat the 0× Ghost immunity as 1×
+    }
     const effectiveness = TYPE_CHART[moveType]?.[targetType];
     if (effectiveness !== undefined) {
       multiplier *= effectiveness;

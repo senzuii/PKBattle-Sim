@@ -9,6 +9,7 @@ const whirlpool: Move = {
   accuracy: 85,
   pp: 15,
   description: 'Traps the foe for 2-5 turns.',
+  effect: { type: 'trap', target: 'opponent' },
 };
 
 export default whirlpool;

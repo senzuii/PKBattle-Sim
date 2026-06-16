@@ -12,6 +12,8 @@ import {
   TurnExecutionResult, calculateStats,
 } from '../engine/battle/BattleManager';
 import { selectAIMove } from '../engine/ai';
+import { rollGender } from '../engine/battle/Gender';
+import { rollNature } from '../data/natures';
 
 const GENERATION_STORAGE_KEY   = '@pkbattler_selected_generation';
 const ACTIVE_TEAM_STORAGE_KEY  = '@pkbattler_active_team';
@@ -111,8 +113,9 @@ interface BattleStore {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const buildBattlePokemon = (customPoke: CustomPokemon): BattlePokemon => {
-  const base  = POKEMON[customPoke.speciesId];
-  const stats = calculateStats(base.baseStats, customPoke.ivs, customPoke.evs, customPoke.level);
+  const base   = POKEMON[customPoke.speciesId];
+  const nature = customPoke.nature ?? rollNature();
+  const stats  = calculateStats(base.baseStats, customPoke.ivs, customPoke.evs, customPoke.level, nature);
   const moves = customPoke.moves
     .map((moveId) => MOVES[moveId])
     .filter((move): move is Move => !!move)
@@ -122,6 +125,8 @@ const buildBattlePokemon = (customPoke: CustomPokemon): BattlePokemon => {
     baseId: customPoke.speciesId,
     name: base.name,
     types: base.types,
+    gender: rollGender(customPoke.speciesId),
+    nature,
     level: customPoke.level,
     ability: customPoke.ability || base.abilities[0] || 'None',
     ivs:  customPoke.ivs,
@@ -271,8 +276,9 @@ export const useBattleStore = create<BattleStore>((set, get) => ({
       `Opponent sent out ${opponentPokemon.name}!`,
     ];
 
-    AbilityManager.onSwitchIn(playerPokemon, opponentPokemon, startLogs);
-    AbilityManager.onSwitchIn(opponentPokemon, playerPokemon, startLogs);
+    const startField = createField();
+    AbilityManager.onSwitchIn(playerPokemon, opponentPokemon, startLogs, startField);
+    AbilityManager.onSwitchIn(opponentPokemon, playerPokemon, startLogs, startField);
 
     startLogs.push('---------------------------------------');
     startLogs.push('--- TURN 1 ---');
@@ -291,7 +297,7 @@ export const useBattleStore = create<BattleStore>((set, get) => ({
       playerDamageTaken: 0,
       winner: null,
       pendingResult: null,
-      field: createField(),
+      field: startField,
     });
   },
 
@@ -368,7 +374,7 @@ export const useBattleStore = create<BattleStore>((set, get) => ({
         if (i === opponentActiveIdx || newOpponentTeam[i].currentHp <= 0) continue;
         const incoming = { ...newOpponentTeam[i] };
         newLogs.push(`Opponent sent out ${incoming.name}!`);
-        AbilityManager.onSwitchIn(incoming, pendingResult.player, newLogs);
+        AbilityManager.onSwitchIn(incoming, pendingResult.player, newLogs, nextField);
         applyEntryHazards(incoming, nextField.opponent.hazards, newLogs);
         newOpponentTeam[i] = incoming;
         if (incoming.currentHp > 0) return { pokemon: incoming, idx: i };
@@ -513,7 +519,7 @@ export const useBattleStore = create<BattleStore>((set, get) => ({
     // Clone the field: Toxic Spikes absorption mutates hazard state.
     const newField = cloneField(field);
     const newPokemon = { ...teamPokemon };
-    if (opponentPokemon) AbilityManager.onSwitchIn(newPokemon, opponentPokemon, newLogs);
+    if (opponentPokemon) AbilityManager.onSwitchIn(newPokemon, opponentPokemon, newLogs, newField);
     applyEntryHazards(newPokemon, newField.player.hazards, newLogs);
     const newPlayerTeam = playerBattleTeam.map((p, i) => (i === idx ? newPokemon : p));
 

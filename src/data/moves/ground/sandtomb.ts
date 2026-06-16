@@ -9,6 +9,7 @@ const sandtomb: Move = {
   accuracy: 85,
   pp: 15,
   description: 'Traps and hurts the foe in quicksand for 2 to 5 turns.',
+  effect: { type: 'trap', target: 'opponent' },
 };
 
 export default sandtomb;

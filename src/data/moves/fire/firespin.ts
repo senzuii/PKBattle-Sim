@@ -9,6 +9,7 @@ const firespin: Move = {
   accuracy: 85,
   pp: 15,
   description: 'Traps foe in fire for 2-5 turns.',
+  effect: { type: 'trap', target: 'opponent' },
 };
 
 export default firespin;

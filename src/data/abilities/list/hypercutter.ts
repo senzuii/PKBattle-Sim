@@ -4,4 +4,5 @@ export const hypercutter: Ability = {
   id: 'Hyper Cutter',
   name: 'Hyper Cutter',
   description: 'Prevents other Pokémon from lowering Attack.',
+  canLowerStat: (_pokemon, stat) => stat !== 'atk',
 };

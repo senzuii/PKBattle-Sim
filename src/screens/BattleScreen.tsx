@@ -422,10 +422,20 @@ const BattleInfoCard: React.FC<{
       <View style={cS.body}>
         <View style={cS.nameRow}>
           <Text style={[cS.name, { fontSize: sizes.hudNameFont }]} numberOfLines={1}>{pokemon.name}</Text>
+          {pokemon.gender && pokemon.gender !== 'N' && (
+            <Text style={{ fontSize: sizes.hudNameFont, fontWeight: '700', color: pokemon.gender === 'M' ? '#3B82F6' : '#EC4899' }}>
+              {pokemon.gender === 'M' ? '♂' : '♀'}
+            </Text>
+          )}
           <Text style={[cS.level, { fontSize: sizes.hudFont + 1 }]}>Lv{pokemon.level}</Text>
           {pokemon.status && (
             <View style={[cS.statusBadge, { backgroundColor: STATUS_COLORS[pokemon.status] ?? '#64748B' }]}>
               <Text style={cS.statusTxt}>{STATUS_ABBR[pokemon.status] ?? pokemon.status}</Text>
+            </View>
+          )}
+          {pokemon.volatileStatuses?.includes('Infatuation') && (
+            <View style={[cS.statusBadge, { backgroundColor: '#EC4899' }]}>
+              <Text style={cS.statusTxt}>♥</Text>
             </View>
           )}
         </View>
@@ -511,7 +521,11 @@ const SwitchCard: React.FC<{
           <View style={swS.info}>
             <View style={swS.nameRow}>
               <Text style={swS.name} numberOfLines={1}>{pokemon.name}</Text>
+              {pokemon.gender && pokemon.gender !== 'N' && (
+                <Text style={{ fontSize: 11, fontWeight: '700', color: pokemon.gender === 'M' ? '#3B82F6' : '#EC4899' }}>{pokemon.gender === 'M' ? '♂' : '♀'}</Text>
+              )}
               <Text style={swS.level}>Lv{pokemon.level}</Text>
+              {pokemon.nature && <Text style={swS.level}>· {pokemon.nature}</Text>}
               {isActive && <View style={swS.activeBadge}><Text style={swS.activeBadgeTxt}>ON FIELD</Text></View>}
               {fainted  && <View style={swS.faintBadge}><Text style={swS.faintBadgeTxt}>FAINTED</Text></View>}
             </View>
@@ -1170,76 +1184,64 @@ export const BattleScreen: React.FC = () => {
     <View style={s.safeArea}>
       <View style={[s.root, { paddingTop: insets.top, paddingBottom: insets.bottom, paddingLeft: insets.left, paddingRight: insets.right }]}>
 
-        {/* ═══════════ TOP: battle scene (left) + log (right) ═══════════ */}
-        <View style={s.topRow}>
-          <View style={s.battleColumn}>
-            <TopBar
-              turnCount={turnCount}
-              totalTimer={totalTimer}
-              turnTimer={turnTimer}
-              fmtTime={fmtTime}
-              weather={field.weather}
-              playerHazards={field.player.hazards}
-              opponentHazards={field.opponent.hazards}
-              playerScreens={field.player.screens}
-              opponentScreens={field.opponent.screens}
-              sizes={sizes}
-            />
+        {/* ═══════════ LEFT: battle scene + moves docked below ═══════════ */}
+        <View style={s.leftColumn}>
+          <TopBar
+            turnCount={turnCount}
+            totalTimer={totalTimer}
+            turnTimer={turnTimer}
+            fmtTime={fmtTime}
+            weather={field.weather}
+            playerHazards={field.player.hazards}
+            opponentHazards={field.opponent.hazards}
+            playerScreens={field.player.screens}
+            opponentScreens={field.opponent.screens}
+            sizes={sizes}
+          />
 
-            <View style={[s.arena, { flex: 1 }]}>
-              <Image source={{ uri: 'https://play.pokemonshowdown.com/sprites/battlebg/bg-forest.jpg' }} style={s.arenaBg} />
-              <View style={s.arenaVignette} />
+          <View style={[s.arena, { flex: 1 }]}>
+            <Image source={{ uri: 'https://play.pokemonshowdown.com/sprites/battlebg/bg-forest.jpg' }} style={s.arenaBg} />
+            <View style={s.arenaVignette} />
 
-              {/* Showdown-style narration banners — enemy up top, player down low */}
-              <MoveBanner lines={enemyBanner}  fontSize={sizes.topBarFont + 4} placement="top"    accent="#EF4444" />
-              <MoveBanner lines={playerBanner} fontSize={sizes.topBarFont + 4} placement="bottom" accent="#00C3E3" />
+            {/* Showdown-style narration banners — enemy up top, player down low */}
+            <MoveBanner lines={enemyBanner}  fontSize={sizes.topBarFont + 4} placement="top"    accent="#EF4444" />
+            <MoveBanner lines={playerBanner} fontSize={sizes.topBarFont + 4} placement="bottom" accent="#00C3E3" />
 
-              <View style={s.enemyHalf}>
-                <BattleInfoCard pokemon={dopp} isPlayer={false} team={opponentBattleTeam} activeIdx={opponentActiveIdx} sizes={sizes} />
-                <View style={s.spriteWrapEnemy}>
-                  <View style={[s.baseShadow, { width: sizes.enemySprite * 0.7 }]} />
-                  <Animated.Image source={oppSprite} style={[{ width: sizes.enemySprite, height: sizes.enemySprite, zIndex: 2 }, { opacity: oppSpriteOpacity, transform: [{ translateX: oppSpriteX }] }]} resizeMode="contain" />
-                  {popups.filter(p => p.target === 'opponent').map(p => (
-                    <PopupAnimation key={p.id} popup={p} onComplete={id => setPopups(curr => curr.filter(x => x.id !== id))} />
-                  ))}
-                </View>
-              </View>
-
-              <View style={s.playerHalf}>
-                <BattleInfoCard pokemon={dp} isPlayer={true} team={playerBattleTeam} activeIdx={playerActiveIdx} sizes={sizes} />
-                <View style={s.spriteWrapPlayer}>
-                  <View style={[s.baseShadow, { width: sizes.playerSprite * 0.7 }]} />
-                  <Animated.Image source={playerSprite} style={[{ width: sizes.playerSprite, height: sizes.playerSprite, zIndex: 2 }, { opacity: playerSpriteOpacity, transform: [{ translateX: playerSpriteX }] }]} resizeMode="contain" />
-                  {popups.filter(p => p.target === 'player').map(p => (
-                    <PopupAnimation key={p.id} popup={p} onComplete={id => setPopups(curr => curr.filter(x => x.id !== id))} />
-                  ))}
-                </View>
-              </View>
-            </View>
-          </View>
-
-          <View style={[s.logColumn, { flex: 1 }]}>
-            <View style={s.logPanel}>
-              <View style={s.logHeader}><Text style={s.logHeaderTxt}>Battle Log</Text></View>
-              <ScrollView ref={scrollRef} style={s.logScroll} contentContainerStyle={s.logContent} showsVerticalScrollIndicator={false}>
-                {visibleLogs.map((line, idx) => (
-                  <AnimatedLogLine key={`${idx}-${line}`} text={line || ' '} textStyle={[logS.base, { fontSize: sizes.logFont }, getLogStyle(line)]} isNew={idx >= newFromIdx} />
+            <View style={s.enemyHalf}>
+              <BattleInfoCard pokemon={dopp} isPlayer={false} team={opponentBattleTeam} activeIdx={opponentActiveIdx} sizes={sizes} />
+              <View style={s.spriteWrapEnemy}>
+                <View style={[s.baseShadow, { width: sizes.enemySprite * 0.7 }]} />
+                <Animated.Image source={oppSprite} style={[{ width: sizes.enemySprite, height: sizes.enemySprite, zIndex: 2 }, { opacity: oppSpriteOpacity, transform: [{ translateX: oppSpriteX }] }]} resizeMode="contain" />
+                {popups.filter(p => p.target === 'opponent').map(p => (
+                  <PopupAnimation key={p.id} popup={p} onComplete={id => setPopups(curr => curr.filter(x => x.id !== id))} />
                 ))}
-                {isAnimating && <Animated.Text style={logS.cursor}>▌</Animated.Text>}
-              </ScrollView>
+              </View>
+            </View>
+
+            <View style={s.playerHalf}>
+              <BattleInfoCard pokemon={dp} isPlayer={true} team={playerBattleTeam} activeIdx={playerActiveIdx} sizes={sizes} />
+              <View style={s.spriteWrapPlayer}>
+                <View style={[s.baseShadow, { width: sizes.playerSprite * 0.7 }]} />
+                <Animated.Image source={playerSprite} style={[{ width: sizes.playerSprite, height: sizes.playerSprite, zIndex: 2 }, { opacity: playerSpriteOpacity, transform: [{ translateX: playerSpriteX }] }]} resizeMode="contain" />
+                {popups.filter(p => p.target === 'player').map(p => (
+                  <PopupAnimation key={p.id} popup={p} onComplete={id => setPopups(curr => curr.filter(x => x.id !== id))} />
+                ))}
+              </View>
             </View>
           </View>
-        </View>
 
-        {/* ═══════════ BOTTOM: full-width controls (moves 2×2 + actions) ═══════════ */}
-        <View style={[s.bottomBar, { height: controlsHeight }]}>
-          <View style={s.movesArea}>
+          {/* Moves fill the bottom of the battle column */}
+          <View style={[s.movesArea, { height: controlsHeight }]}>
             {[0, 2].map(start => (
               <View key={start} style={s.movesRow}>
                 {playerPokemon.moves.slice(start, start + 2).map(move => {
                   const isSelected = selectedMoveId === move.id || (playerPokemon.lockedMove && move.id === playerPokemon.lockedMove.moveId);
                   const isLockedOut = (!!playerPokemon.lockedMove && move.id !== playerPokemon.lockedMove.moveId)
-                    || (move.currentPp ?? move.pp) <= 0;
+                    || (move.currentPp ?? move.pp) <= 0
+                    || (!!playerPokemon.taunted && playerPokemon.taunted > 0 && move.category === 'Status')
+                    || (playerPokemon.disabled?.moveId === move.id)
+                    || (!!playerPokemon.encore && move.id !== playerPokemon.encore.moveId)
+                    || (!!playerPokemon.torment && playerPokemon.lastMoveUsed === move.id);
                   return (
                     <MoveButton
                       key={move.id}
@@ -1258,15 +1260,28 @@ export const BattleScreen: React.FC = () => {
               </View>
             ))}
           </View>
+        </View>
 
-          <View style={s.actionArea}>
+        {/* ═══════════ RIGHT: log (full height) + Pokémon/Run docked below ═══════════ */}
+        <View style={s.rightColumn}>
+          <View style={s.logPanel}>
+            <View style={s.logHeader}><Text style={s.logHeaderTxt}>Battle Log</Text></View>
+            <ScrollView ref={scrollRef} style={s.logScroll} contentContainerStyle={s.logContent} showsVerticalScrollIndicator={false}>
+              {visibleLogs.map((line, idx) => (
+                <AnimatedLogLine key={`${idx}-${line}`} text={line || ' '} textStyle={[logS.base, { fontSize: sizes.logFont }, getLogStyle(line)]} isNew={idx >= newFromIdx} />
+              ))}
+              {isAnimating && <Animated.Text style={logS.cursor}>▌</Animated.Text>}
+            </ScrollView>
+          </View>
+
+          <View style={[s.actionArea, { height: controlsHeight }]}>
             {selectedMoveId ? (
               <TouchableOpacity style={[s.actionBtn, s.actionCancel, { flex: 1 }]} onPress={() => setSelectedMoveId(null)} disabled={isAnimating}>
                 <Text style={s.actionBtnTxt}>Cancel</Text>
               </TouchableOpacity>
             ) : (
               <>
-                <TouchableOpacity style={[s.actionBtn, s.actionSwitch, { flex: 1 }]} onPress={() => setSwitchModalVisible(true)} disabled={isAnimating || !!playerPokemon.lockedMove}>
+                <TouchableOpacity style={[s.actionBtn, s.actionSwitch, { flex: 1 }, (!!playerPokemon.lockedMove || !!playerPokemon.trap) && { opacity: 0.5 }]} onPress={() => setSwitchModalVisible(true)} disabled={isAnimating || !!playerPokemon.lockedMove || !!playerPokemon.trap}>
                   <Text style={s.actionBtnTxt}>Pokémon</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={[s.actionBtn, s.actionRun, { flex: 1 }]} onPress={handleFlee} disabled={isAnimating || !!playerPokemon.lockedMove}>
@@ -1314,12 +1329,11 @@ const logS = StyleSheet.create({
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#0f172a' },
-  root:     { flex: 1, flexDirection: 'column' },
+  root:     { flex: 1, flexDirection: 'row' },
 
-  // Top region: battle scene + log side by side
-  topRow:       { flex: 1, flexDirection: 'row' },
-  battleColumn: { flex: 3.4, flexDirection: 'column' },
-  logColumn:    { flexDirection: 'column', borderLeftWidth: 2, borderLeftColor: '#334155' },
+  // Two full-height columns: battle+moves on the left, log+actions on the right
+  leftColumn:  { flex: 3.4, flexDirection: 'column' },
+  rightColumn: { flex: 1, flexDirection: 'column', borderLeftWidth: 2, borderLeftColor: '#334155' },
 
   // Arena
   arena: { flex: 6, position: 'relative', overflow: 'hidden', backgroundColor: '#8ea679' },
@@ -1334,11 +1348,10 @@ const s = StyleSheet.create({
 
   baseShadow: { position: 'absolute', bottom: 0, height: 16, backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 50, transform: [{ scaleX: 1.4 }], zIndex: 1 },
 
-  // Full-width controls bar (moves 2×2 on the left, actions stacked on the right)
-  bottomBar:  { flexDirection: 'row', backgroundColor: '#1e293b', borderTopWidth: 2, borderTopColor: '#334155', padding: 8, gap: 8 },
-  movesArea:  { flex: 3.4, gap: 6 },
+  // Moves dock at the bottom of the battle column; actions at the bottom of the log column
+  movesArea:  { backgroundColor: '#1e293b', borderTopWidth: 2, borderTopColor: '#334155', padding: 8, gap: 6 },
   movesRow:   { flex: 1, flexDirection: 'row', gap: 6 },
-  actionArea: { flex: 1, gap: 6 },
+  actionArea: { backgroundColor: '#1e293b', borderTopWidth: 2, borderTopColor: '#334155', padding: 8, gap: 6 },
 
   actionBtn: { borderRadius: 6, justifyContent: 'center', alignItems: 'center' },
   actionSwitch: { backgroundColor: '#3b82f6' },

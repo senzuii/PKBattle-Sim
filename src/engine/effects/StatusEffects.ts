@@ -101,6 +101,15 @@ export function resolvePreMoveStatuses(
     }
   }
 
+  // 7. Infatuation (50% immobilized by love)
+  if (attacker.volatileStatuses.includes('Infatuation')) {
+    logs.push(`${attacker.name} is in love!`);
+    if (rng.next() < 0.5) {
+      logs.push(`${attacker.name} is immobilized by love!`);
+      return blocked();
+    }
+  }
+
   return { canAct: true, selfDamage: 0 };
 }
 

@@ -145,6 +145,59 @@ function handleMimic(attacker: BattlePokemon, defender: BattlePokemon, _move: Mo
   logs.push(`${attacker.name} learned ${targetMove.name}!`);
 }
 
+// Attract — infatuates the target if it's the opposite (and a non-genderless) gender.
+function handleAttract(attacker: BattlePokemon, defender: BattlePokemon, _move: Move, logs: string[]): void {
+  if (defender.volatileStatuses.includes('Infatuation')) {
+    logs.push('But it failed!');
+    return;
+  }
+  const a = attacker.gender;
+  const d = defender.gender;
+  if (!a || !d || a === 'N' || d === 'N' || a === d) {
+    logs.push('But it failed!');
+    return;
+  }
+  if (!AbilityManager.canApplyStatus(defender, 'Infatuation')) {
+    logs.push(`[${defender.name}'s ${defender.ability}]`);
+    logs.push(`It doesn't affect ${defender.name}...`);
+    return;
+  }
+  defender.volatileStatuses.push('Infatuation');
+  logs.push(`${defender.name} fell in love!`);
+}
+
+// Taunt — blocks the target's status moves for a few turns.
+function handleTaunt(_attacker: BattlePokemon, defender: BattlePokemon, _move: Move, logs: string[]): void {
+  if (defender.taunted && defender.taunted > 0) { logs.push('But it failed!'); return; }
+  defender.taunted = 3;
+  logs.push(`${defender.name} fell for the taunt!`);
+}
+
+// Disable — locks out the target's last-used move.
+function handleDisable(_attacker: BattlePokemon, defender: BattlePokemon, _move: Move, logs: string[]): void {
+  if (defender.disabled || !defender.lastMoveUsed) { logs.push('But it failed!'); return; }
+  const disabledMove = MOVES[defender.lastMoveUsed];
+  defender.disabled = { moveId: defender.lastMoveUsed, turnsLeft: 4 };
+  logs.push(`${defender.name}'s ${disabledMove?.name ?? 'move'} was disabled!`);
+}
+
+// Encore — forces the target to repeat its last move.
+function handleEncore(_attacker: BattlePokemon, defender: BattlePokemon, _move: Move, logs: string[]): void {
+  if (defender.encore || !defender.lastMoveUsed || defender.lastMoveUsed === 'encore') {
+    logs.push('But it failed!');
+    return;
+  }
+  defender.encore = { moveId: defender.lastMoveUsed, turnsLeft: 3 };
+  logs.push(`${defender.name} got an encore!`);
+}
+
+// Torment — the target can't use the same move twice in a row.
+function handleTorment(_attacker: BattlePokemon, defender: BattlePokemon, _move: Move, logs: string[]): void {
+  if (defender.torment) { logs.push('But it failed!'); return; }
+  defender.torment = true;
+  logs.push(`${defender.name} was subjected to torment!`);
+}
+
 // Protect / Detect / Endure — success rate halves with each consecutive use;
 // the counter is reset by TurnEngine whenever the user does anything else.
 function handleProtect(attacker: BattlePokemon, _defender: BattlePokemon, move: Move, logs: string[], rng?: BattleRng): void {
@@ -179,6 +232,11 @@ const SPECIAL_HANDLERS: Record<string, MoveHandler> = {
   detect:       handleProtect,
   endure:       handleProtect,
   mimic:        handleMimic,
+  attract:      handleAttract,
+  taunt:        handleTaunt,
+  disable:      handleDisable,
+  encore:       handleEncore,
+  torment:      handleTorment,
 };
 
 export function getSpecialMoveHandler(moveId: string): MoveHandler | undefined {
@@ -224,6 +282,16 @@ export function executeMoveEffect(
     case 'stat_change': {
       if (!effect.stat) break;
       const stages = effect.stages ?? 0;
+
+      // Clear Body / Hyper Cutter / Keen Eye block FOE-inflicted drops (not self-debuffs).
+      if (stages < 0 && effect.target === 'opponent' && !AbilityManager.canLowerStat(target, effect.stat)) {
+        if (!ctx.isSecondary) {
+          logs.push(`[${target.name}'s ${target.ability}]`);
+          logs.push(`${target.name}'s stats were not lowered!`);
+        }
+        break;
+      }
+
       const { newStage, changed } = modifyStatStage(target.statStages[effect.stat], stages);
       target.statStages[effect.stat] = newStage;
 
@@ -359,6 +427,7 @@ export function executeMoveEffect(
     case 'recoil': {
       const dmg = ctx.damageDealt ?? 0;
       if (dmg <= 0) break;
+      if (attacker.ability === 'Rock Head') break; // Rock Head negates recoil
       const pct = effect.percent ?? 25;
       const recoil = Math.max(1, Math.floor((dmg * pct) / 100));
       attacker.currentHp = Math.max(0, attacker.currentHp - recoil);
@@ -370,6 +439,15 @@ export function executeMoveEffect(
     // Handled in DamageCalculator — nothing extra to do here
     case 'fixed_damage':
       break;
+
+    // ── Trap (Wrap / Bind / Fire Spin / Clamp / Whirlpool / Sand Tomb) ──────
+    case 'trap': {
+      if (defender.currentHp <= 0 || defender.trap) break;
+      const moveName = MOVES[ctx.moveId]?.name ?? 'the attack';
+      defender.trap = { turnsLeft: intBetween(ctx.rng ?? defaultRng, 2, 5), moveName };
+      logs.push(`${defender.name} was trapped by ${moveName}!`);
+      break;
+    }
 
     default:
       break;

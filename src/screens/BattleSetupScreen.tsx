@@ -22,6 +22,7 @@ import { RootStackParamList } from '../types/Navigation';
 import { FrontSprites } from '../assets/Sprites';
 import { isMoveLegalForPokemon } from '../engine/learnset/LearnsetChecker';
 import { getPokemonPoolForGen, isPokemonInGen } from '../data/genDex';
+import { NATURE_LIST, natureSummary } from '../data/natures';
 
 const TYPE_COLORS: Record<string, string> = {
   Grass: '#4CAF50', Fire: '#FF5722', Water: '#2196F3',
@@ -640,6 +641,22 @@ export const BattleSetupScreen: React.FC = () => {
                         </TouchableOpacity>
                       ))}
                     </View>
+                  </View>
+
+                  {/* Nature Picker */}
+                  <View style={m.formField}>
+                    <Text style={m.fieldLabel}>NATURE</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexDirection: 'row', gap: 6, paddingVertical: 2 }}>
+                      {NATURE_LIST.map(nat => {
+                        const active = editingPokemon.nature === nat;
+                        return (
+                          <TouchableOpacity key={nat} style={[m.abilityPill, active && m.abilityPillActive]} onPress={() => setEditingPokemon({ ...editingPokemon, nature: nat })}>
+                            <Text style={[m.abilityPillTxt, active && m.abilityPillTxtActive]}>{nat}</Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
+                    <Text style={{ color: '#64748B', fontSize: 10, fontWeight: '500', marginTop: 4 }}>{editingPokemon.nature ? natureSummary(editingPokemon.nature) : 'Random nature (tap to choose one)'}</Text>
                   </View>
 
                   {/* Moves */}

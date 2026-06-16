@@ -28,6 +28,10 @@ export function applyEndOfTurnEffects(
   applyScreens(field.opponent, "The opponent's",    logs);
   applyStatusDamage(p, logs);
   applyStatusDamage(o, logs);
+  applyTrap(p, logs);
+  applyTrap(o, logs);
+  tickMoveLocks(p, logs);
+  tickMoveLocks(o, logs);
   applyLeechSeed(p, o, logs);  // p is seeded → o heals
   applyLeechSeed(o, p, logs);  // o is seeded → p heals
   applyWish(field.player,   p, logs);
@@ -38,6 +42,43 @@ export function applyEndOfTurnEffects(
   AbilityManager.onEndOfTurn(o, logs);
   clearTurnVolatiles(p);
   clearTurnVolatiles(o);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Trapping moves (Wrap/Bind/Fire Spin/…) — 1/16 chip each turn, then release.
+// ─────────────────────────────────────────────────────────────────────────────
+function applyTrap(poke: BattlePokemon, logs: string[]): void {
+  if (!poke.trap || poke.currentHp <= 0) return;
+  const { moveName } = poke.trap;
+  poke.trap.turnsLeft -= 1;
+  if (poke.trap.turnsLeft <= 0) {
+    poke.trap = undefined;
+    logs.push(`${poke.name} was freed from ${moveName}!`);
+    return;
+  }
+  const dmg = Math.max(1, Math.floor(poke.maxHp / 16));
+  poke.currentHp = Math.max(0, poke.currentHp - dmg);
+  logs.push(`${poke.name} is hurt by ${moveName}!`);
+  logs.push(`${poke.name} took ${dmg} damage!`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Move-locking volatiles — count Taunt / Disable / Encore down, expire at 0.
+// ─────────────────────────────────────────────────────────────────────────────
+function tickMoveLocks(poke: BattlePokemon, logs: string[]): void {
+  if (poke.currentHp <= 0) return;
+  if (poke.taunted && poke.taunted > 0) {
+    poke.taunted -= 1;
+    if (poke.taunted <= 0) { poke.taunted = undefined; logs.push(`${poke.name} shook off the taunt!`); }
+  }
+  if (poke.disabled) {
+    poke.disabled.turnsLeft -= 1;
+    if (poke.disabled.turnsLeft <= 0) { poke.disabled = undefined; logs.push(`${poke.name} is no longer disabled!`); }
+  }
+  if (poke.encore) {
+    poke.encore.turnsLeft -= 1;
+    if (poke.encore.turnsLeft <= 0) { poke.encore = undefined; logs.push(`${poke.name}'s encore ended!`); }
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

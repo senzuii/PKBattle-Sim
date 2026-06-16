@@ -9,6 +9,7 @@ const bind: Move = {
   accuracy: 85,
   pp: 20,
   description: 'Binds the target for 2-5 turns.',
+  effect: { type: 'trap', target: 'opponent' },
 };
 
 export default bind;

@@ -8,9 +8,11 @@
  * TurnExecutionResult from this file will still work.
  */
 
-import { BattlePokemon, PokemonBase, Move, Stats } from '../../types/Pokemon';
+import { BattlePokemon, PokemonBase, Move, Stats, Nature } from '../../types/Pokemon';
 import { MOVES } from '../../data/moves';
 import { isMoveLegalForPokemon } from '../learnset/LearnsetChecker';
+import { rollGender } from './Gender';
+import { applyNature, rollNature } from '../../data/natures';
 
 // ── Re-export the turn engine so existing imports keep working ────────────────
 export { executeTurn, executeBattleTurn, resetVolatileState } from './TurnEngine';
@@ -56,13 +58,13 @@ export function generateRandomEVs(): Stats {
 // ─────────────────────────────────────────────────────────────────────────────
 // Stat Calculation (Gen 3+ formula)
 // ─────────────────────────────────────────────────────────────────────────────
-export function calculateStats(base: Stats, ivs: Stats, evs: Stats, level: number): Stats {
+export function calculateStats(base: Stats, ivs: Stats, evs: Stats, level: number, nature?: Nature): Stats {
   const norm = (b: number, iv: number, ev: number) =>
     Math.floor(((2 * b + iv + Math.floor(ev / 4)) * level) / 100) + 5;
   const hp = (b: number, iv: number, ev: number) =>
     Math.floor(((2 * b + iv + Math.floor(ev / 4)) * level) / 100) + level + 10;
 
-  return {
+  const stats: Stats = {
     hp:  hp(base.hp,  ivs.hp,  evs.hp),
     atk: norm(base.atk, ivs.atk, evs.atk),
     def: norm(base.def, ivs.def, evs.def),
@@ -70,6 +72,7 @@ export function calculateStats(base: Stats, ivs: Stats, evs: Stats, level: numbe
     spd: norm(base.spd, ivs.spd, evs.spd),
     spe: norm(base.spe, ivs.spe, evs.spe),
   };
+  return applyNature(stats, nature);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -119,9 +122,10 @@ export function generatePokemon(
   level: number = 7,
   gen: number | null = null,
 ): BattlePokemon {
-  const ivs   = generateRandomIVs();
-  const evs   = generateRandomEVs();
-  const stats = calculateStats(base.baseStats, ivs, evs, level);
+  const ivs    = generateRandomIVs();
+  const evs    = generateRandomEVs();
+  const nature = rollNature();
+  const stats  = calculateStats(base.baseStats, ivs, evs, level, nature);
 
   // Build the legal move pool for this species at this level/gen
   let entries = base.learnset
@@ -147,6 +151,8 @@ export function generatePokemon(
     baseId:           base.id,
     name:             base.name,
     types:            base.types,
+    gender:           rollGender(base.id),
+    nature,
     level,
     ivs,
     evs,

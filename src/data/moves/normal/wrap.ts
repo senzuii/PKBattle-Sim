@@ -9,6 +9,7 @@ const wrap: Move = {
   accuracy: 90,
   pp: 20,
   description: 'Squeezes the foe for 2-5 turns.',
+  effect: { type: 'trap', target: 'opponent' },
 };
 
 export default wrap;

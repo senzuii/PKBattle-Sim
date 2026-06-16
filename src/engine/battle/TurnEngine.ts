@@ -87,6 +87,9 @@ function clonePokemon(src: BattlePokemon): BattlePokemon {
     moves:            src.moves.map(m => ({ ...m })),
     lockedMove:       src.lockedMove ? { ...src.lockedMove } : undefined,
     mimicBackup:      src.mimicBackup ? { index: src.mimicBackup.index, move: { ...src.mimicBackup.move } } : undefined,
+    trap:             src.trap ? { ...src.trap } : undefined,
+    disabled:         src.disabled ? { ...src.disabled } : undefined,
+    encore:           src.encore ? { ...src.encore } : undefined,
   };
 }
 
@@ -106,6 +109,11 @@ export function resetVolatileState(src: BattlePokemon): BattlePokemon {
   copy.toxicCounter     = 0;
   copy.protectCounter   = 0;
   copy.lastMoveUsed     = undefined;
+  copy.trap             = undefined;
+  copy.taunted          = undefined;
+  copy.disabled         = undefined;
+  copy.encore           = undefined;
+  copy.torment          = undefined;
   if (copy.mimicBackup) {
     copy.moves[copy.mimicBackup.index] = copy.mimicBackup.move;
     copy.mimicBackup = undefined;
@@ -171,14 +179,14 @@ function applyDamage(
 
   // Sturdy: survive a one-hit KO from full HP
   let finalDamage = Math.min(rawDamage, defender.currentHp);
+  let survivedBy: 'sturdy' | 'endure' | null = null;
   if (
     defender.ability === 'Sturdy' &&
     defender.currentHp === defender.maxHp &&
     finalDamage >= defender.currentHp
   ) {
     finalDamage = defender.currentHp - 1;
-    logs.push(`[${defender.name}'s Sturdy]`);
-    logs.push(`${defender.name} hung on!`);
+    survivedBy = 'sturdy';
   }
 
   // Endure: always survive with at least 1 HP this turn
@@ -187,11 +195,20 @@ function applyDamage(
     finalDamage >= defender.currentHp
   ) {
     finalDamage = defender.currentHp - 1;
-    logs.push(`${defender.name} endured the hit!`);
+    survivedBy = 'endure';
   }
 
   defender.currentHp = Math.max(0, defender.currentHp - finalDamage);
   logs.push(`${defender.name} took ${finalDamage} damage!`);
+
+  // "Hung on" / "endured" messages come after the damage is shown
+  if (survivedBy === 'sturdy') {
+    logs.push(`[${defender.name}'s Sturdy]`);
+    logs.push(`${defender.name} hung on!`);
+  } else if (survivedBy === 'endure') {
+    logs.push(`${defender.name} endured the hit!`);
+  }
+
   return finalDamage;
 }
 
@@ -340,7 +357,7 @@ function performSwitch(side: Side, other: Side, field: FieldState, logs: string[
     ? `You switched to ${incoming.name}!`
     : `Opponent switched to ${incoming.name}!`);
   side.pokemon = incoming;
-  AbilityManager.onSwitchIn(incoming, other.pokemon, logs);
+  AbilityManager.onSwitchIn(incoming, other.pokemon, logs, field);
   applyEntryHazards(incoming, sideOf(field, side.isPlayer).hazards, logs);
 }
 
@@ -359,6 +376,24 @@ function performMove(side: Side, other: Side, move: Move, field: FieldState, log
   const resolution = resolvePreMoveStatuses(attacker, logs, rng);
   side.damageTaken += resolution.selfDamage;
   if (!resolution.canAct) return;
+
+  // ── Move-locking volatiles (Encore forces, Taunt/Disable/Torment block) ──
+  if (attacker.encore) {
+    const forced = attacker.moves.find(m => m.id === attacker.encore!.moveId);
+    if (forced) move = forced; // Encore overrides the chosen move
+  }
+  if (attacker.taunted && attacker.taunted > 0 && move.category === 'Status') {
+    logs.push(`${attacker.name} can't use ${move.name} after the taunt!`);
+    return;
+  }
+  if (attacker.disabled && attacker.disabled.moveId === move.id) {
+    logs.push(`${attacker.name}'s ${move.name} is disabled!`);
+    return;
+  }
+  if (attacker.torment && attacker.lastMoveUsed === move.id) {
+    logs.push(`${attacker.name} can't use ${move.name} twice in a row!`);
+    return;
+  }
 
   // ── 2-turn charge move handling (Solar Beam fires instantly in sun) ──────
   const skipCharge = move.id === 'solarbeam' && weather === 'Sun';
@@ -465,8 +500,8 @@ function performMove(side: Side, other: Side, move: Move, field: FieldState, log
     return;
   }
 
-  // Type immunity
-  if (getEffectiveness(move.type, defender.types) === 0) {
+  // Type immunity (Scrappy lets Normal/Fighting ignore Ghost immunity)
+  if (getEffectiveness(move.type, defender.types, attacker.ability === 'Scrappy') === 0) {
     logs.push('It has no effect...');
     if (move.flags?.selfDestruct) attacker.currentHp = 0;
     return;
@@ -528,6 +563,14 @@ function performMove(side: Side, other: Side, move: Move, field: FieldState, log
     // Recharge lock (Hyper Beam, Blast Burn, etc.)
     if (move.flags?.recharge) {
       attacker.lockedMove = { moveId: move.id, turn: 1, isRecharge: true };
+    }
+
+    // Self-switch (U-turn, Volt Switch) — the user retreats after attacking.
+    // Only if the user survived the exchange; the store decides if a
+    // replacement is actually available.
+    if (move.flags?.selfSwitch && attacker.currentHp > 0) {
+      flags.forceSwitch = side.isPlayer ? 'player' : 'opponent';
+      logs.push(`${attacker.name} went back!`);
     }
   }
 

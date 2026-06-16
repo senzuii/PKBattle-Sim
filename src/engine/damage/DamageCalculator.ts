@@ -210,7 +210,7 @@ function computeCoreDamage(
   screens?: ScreenState,
 ): { damage: number; effectiveness: number; hasStab: boolean; isFixed: boolean } {
   const { type: moveType, power: basePower } = effectiveTypeAndPower(move, weather);
-  const effectiveness = getEffectiveness(moveType, defender.types);
+  const effectiveness = getEffectiveness(moveType, defender.types, attacker.ability === 'Scrappy');
   const hasStab = attacker.types.includes(moveType);
 
   if (effectiveness === 0) {

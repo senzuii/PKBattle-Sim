@@ -4,4 +4,5 @@ export const oblivious: Ability = {
   id: 'Oblivious',
   name: 'Oblivious',
   description: 'Keeps the Pokémon from being infatuated.',
+  canApplyStatus: (_pokemon, status) => status !== 'Infatuation',
 };
