@@ -28,3 +28,17 @@ export function rollGender(speciesId: string, rng: BattleRng = defaultRng): Gend
 export function genderSymbol(gender?: Gender): string {
   return gender === 'M' ? '♂' : gender === 'F' ? '♀' : '';
 }
+
+/** Genders a species can actually be — for the team-builder picker. */
+export function possibleGenders(speciesId: string): Gender[] {
+  const norm = speciesId.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const entry = (Pokedex as Record<string, any>)[norm];
+  if (entry?.gender) return [entry.gender as Gender]; // fixed (e.g. Miltank → ['F'])
+  if (entry?.genderRatio) {
+    const r = entry.genderRatio as { M: number; F: number };
+    if (r.M === 0) return ['F'];
+    if (r.F === 0) return ['M'];
+    return ['M', 'F'];
+  }
+  return ['M', 'F']; // default 50/50 species
+}

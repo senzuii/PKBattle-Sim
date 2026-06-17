@@ -8,12 +8,14 @@ import {
   Image,
   useWindowDimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useBattleStore } from '../store/useBattleStore';
 import { RootStackParamList } from '../types/Navigation';
 import { BattlePokemon } from '../types/Pokemon';
 import { FrontSprites } from '../assets/Sprites';
+import { COLORS } from '../theme';
 
 // ─── Roster row: one Pokémon's portrait, name/level, and HP/fainted state ─────
 const RosterRow: React.FC<{ pokemon: BattlePokemon; accent: string; compact: boolean }> = ({ pokemon, accent, compact }) => {
@@ -31,13 +33,13 @@ const RosterRow: React.FC<{ pokemon: BattlePokemon; accent: string; compact: boo
           <Text style={[rS.name, { fontSize: compact ? 13 : 15 }]} numberOfLines={1}>{pokemon.name}</Text>
           {fainted && <View style={rS.faintBadge}><Text style={rS.faintBadgeTxt}>KO</Text></View>}
         </View>
-        <Text style={[rS.level, { fontSize: compact ? 10 : 12 }]}>Lv{pokemon.level}</Text>
+        <Text style={[rS.level, { fontSize: compact ? 10 : 12 }]} numberOfLines={1}>Lv{pokemon.level}</Text>
       </View>
     </View>
   );
 };
 const rS = StyleSheet.create({
-  row: { width: '48%', flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(30,41,59,0.7)', borderRadius: 10, borderWidth: 1, borderColor: '#334155', overflow: 'hidden', marginBottom: 10 },
+  row: { width: '100%', flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(30,41,59,0.7)', borderRadius: 10, borderWidth: 1, borderColor: '#334155', overflow: 'hidden', marginBottom: 8 },
   rowFainted: { opacity: 0.6 },
   accentBar: { width: 6, alignSelf: 'stretch' },
   spriteWrap: { width: 56, height: 56, alignItems: 'center', justifyContent: 'center', marginLeft: 10 },
@@ -68,6 +70,7 @@ export const ResultsScreen: React.FC = () => {
 
   const { height } = useWindowDimensions();
   const compact = height < 500;
+  const insets = useSafeAreaInsets();
 
   const handleReturn = () => {
     resetBattle();
@@ -101,18 +104,18 @@ export const ResultsScreen: React.FC = () => {
   const opponentKOs = playerBattleTeam.filter(p => p.currentHp <= 0).length;
 
   return (
-    <View style={s.root}>
-      {/* ═══════════ LEFT: RESULT BANNER ═══════════ */}
-      <View style={s.leftColumn}>
+    <View style={[s.root, { paddingTop: insets.top, paddingBottom: insets.bottom, paddingLeft: insets.left, paddingRight: insets.right }]}>
+      {/* ═══════════ LEFT PANE: result, stats, actions ═══════════ */}
+      <View style={s.leftPane}>
         <View style={[s.banner, { borderColor: accent, backgroundColor: isPlayerWinner ? 'rgba(0,195,227,0.08)' : 'rgba(255,69,84,0.08)' }]}>
           <View style={[s.bannerAccent, { backgroundColor: accent }]} />
-          <Text style={[s.bannerText, { color: accent, fontSize: compact ? 30 : 44 }]}>
+          <Text style={[s.bannerText, { color: accent, fontSize: compact ? 26 : 32 }]}>
             {isPlayerWinner ? 'VICTORY' : 'DEFEAT'}
           </Text>
-          <Text style={[s.narrativeText, { fontSize: compact ? 10 : 12 }]}>{getBattleNarrative()}</Text>
+          <Text style={s.narrativeText} numberOfLines={4}>{getBattleNarrative()}</Text>
         </View>
 
-        <View style={s.statsRow}>
+        <View style={s.statsGrid}>
           <View style={s.statCard}>
             <Text style={s.statValue}>{turnCount}</Text>
             <Text style={s.statLabel}>TURNS</Text>
@@ -130,10 +133,19 @@ export const ResultsScreen: React.FC = () => {
             <Text style={s.statLabel}>KOs (Y-O)</Text>
           </View>
         </View>
+
+        <View style={s.actionsCol}>
+          <TouchableOpacity style={[s.actionBtn, { backgroundColor: accent, borderColor: accent }]} onPress={handleBattleAgain}>
+            <Text style={[s.actionBtnTxt, { color: '#06121A' }]}>⚔  BATTLE AGAIN</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[s.actionBtn, { backgroundColor: 'transparent', borderColor: accent }]} onPress={handleReturn}>
+            <Text style={[s.actionBtnTxt, { color: accent }]}>RETURN TO MENU</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
-      {/* ═══════════ RIGHT: FINAL TEAMS ═══════════ */}
-      <View style={s.rightColumn}>
+      {/* ═══════════ RIGHT PANE: final teams ═══════════ */}
+      <View style={s.rightPane}>
         <View style={s.rosterHeader}>
           <Text style={s.rosterHeaderTxt}>FINAL TEAMS</Text>
         </View>
@@ -157,47 +169,42 @@ export const ResultsScreen: React.FC = () => {
             </View>
           </View>
         </ScrollView>
-        <View style={s.actionsRow}>
-          <TouchableOpacity style={[s.actionBtn, { backgroundColor: '#1E293B', borderColor: accent }]} onPress={handleReturn}>
-            <Text style={[s.actionBtnTxt, { color: accent }]}>RETURN TO MENU</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[s.actionBtn, { backgroundColor: accent, borderColor: accent }]} onPress={handleBattleAgain}>
-            <Text style={[s.actionBtnTxt, { color: '#0F172A' }]}>BATTLE AGAIN (RANDOM)</Text>
-          </TouchableOpacity>
-        </View>
       </View>
     </View>
   );
 };
 
 const s = StyleSheet.create({
-  root: { flex: 1, flexDirection: 'column', backgroundColor: '#0F172A' },
+  root: { flex: 1, flexDirection: 'row', backgroundColor: COLORS.bg },
 
-  leftColumn: { padding: 16, alignItems: 'center' },
-  rightColumn: { flex: 1, borderTopWidth: 2, borderTopColor: '#334155', backgroundColor: '#0B1220' },
+  // Left pane: vertically centered so the result feels balanced on short screens.
+  leftPane: {
+    width: '40%', maxWidth: 380, padding: 12, gap: 10, justifyContent: 'center',
+    borderRightWidth: 1, borderRightColor: COLORS.border,
+  },
+  rightPane: { flex: 1, backgroundColor: '#0B1220' },
 
   banner: {
-    width: '100%', maxWidth: 480,
     borderRadius: 14, borderWidth: 2, overflow: 'hidden',
-    alignItems: 'center', justifyContent: 'center', paddingVertical: 18, paddingHorizontal: 16,
+    alignItems: 'center', justifyContent: 'center', paddingVertical: 14, paddingHorizontal: 12,
   },
   bannerAccent: { position: 'absolute', top: 0, left: 0, right: 0, height: 4 },
-  bannerText: { fontWeight: '700', letterSpacing: 6 },
-  narrativeText: { color: '#CBD5E1', textAlign: 'center', marginTop: 10, lineHeight: 18, maxWidth: 480 },
+  bannerText: { fontWeight: '700', letterSpacing: 4 },
+  narrativeText: { color: '#CBD5E1', textAlign: 'center', marginTop: 6, fontSize: 11, lineHeight: 15 },
 
-  statsRow: { width: '100%', maxWidth: 480, flexDirection: 'row', gap: 8, marginVertical: 12 },
-  statCard: { flex: 1, backgroundColor: '#1E293B', borderRadius: 10, borderWidth: 1, borderColor: '#334155', alignItems: 'center', paddingVertical: 10 },
-  statValue: { color: '#F8FAFC', fontSize: 18, fontWeight: '700', fontFamily: 'monospace' },
-  statLabel: { color: '#64748B', fontSize: 9, fontWeight: '600', letterSpacing: 1, marginTop: 2 },
+  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  statCard: { flexBasis: '47%', flexGrow: 1, backgroundColor: COLORS.card, borderRadius: 10, borderWidth: 1, borderColor: COLORS.border, alignItems: 'center', paddingVertical: 8 },
+  statValue: { color: COLORS.text, fontSize: 16, fontWeight: '700', fontFamily: 'monospace' },
+  statLabel: { color: COLORS.textMuted, fontSize: 9, fontWeight: '600', letterSpacing: 1, marginTop: 2 },
 
-  actionsRow: { flexDirection: 'row', gap: 10, padding: 16, borderTopWidth: 1, borderTopColor: '#334155' },
-  actionBtn: { flex: 1, borderRadius: 10, borderWidth: 1.5, paddingVertical: 14, alignItems: 'center' },
-  actionBtnTxt: { fontSize: 13, fontWeight: '700', letterSpacing: 1.5 },
+  actionsCol: { gap: 8, marginTop: 2 },
+  actionBtn: { borderRadius: 10, borderWidth: 1.5, paddingVertical: 10, alignItems: 'center' },
+  actionBtnTxt: { fontSize: 12, fontWeight: '700', letterSpacing: 1.5 },
 
-  rosterHeader: { paddingVertical: 10, alignItems: 'center', backgroundColor: '#0f172a', borderBottomWidth: 1, borderBottomColor: '#1e293b' },
-  rosterHeaderTxt: { color: '#94A3B8', fontSize: 11, fontWeight: '700', letterSpacing: 2 },
-  rosterContent: { padding: 10, alignItems: 'center' },
-  rosterTeams: { width: '100%', maxWidth: 900, flexDirection: 'row', gap: 16 },
+  rosterHeader: { paddingVertical: 8, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  rosterHeaderTxt: { color: COLORS.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 2 },
+  rosterContent: { padding: 10 },
+  rosterTeams: { flexDirection: 'row', gap: 12 },
   rosterTeamColumn: { flex: 1 },
   rosterGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
   rosterLabel: { width: '100%', fontSize: 10, fontWeight: '700', letterSpacing: 1.5, marginBottom: 6 },

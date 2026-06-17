@@ -93,6 +93,7 @@ export interface CustomPokemon {
   ivs: Stats;
   evs: Stats;
   nature?: Nature;
+  gender?: Gender;
   heldItem?: string;
 }
 
@@ -135,6 +136,10 @@ export interface BattlePokemon {
   disabled?: { moveId: string; turnsLeft: number }; // Disable: a move that can't be used
   encore?: { moveId: string; turnsLeft: number };   // Encore: forced to repeat this move
   torment?: boolean;                              // Torment: can't use the same move twice in a row
+  damageTakenThisTurn?: { physical: number; special: number }; // for Counter / Mirror Coat
+  bide?: { turnsLeft: number; damage: number };   // Bide: store damage, then release 2×
+  foresighted?: boolean;                          // Foresight/Odor Sleuth: Normal/Fighting hit this Ghost
+  focusEnergy?: boolean;                           // Focus Energy: +2 crit stages
 }
 
 export type BattleDifficulty = 'easy' | 'medium' | 'hard' | 'cheating';

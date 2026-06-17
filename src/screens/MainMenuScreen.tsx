@@ -13,6 +13,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useBattleStore } from '../store/useBattleStore';
 import { RootStackParamList } from '../types/Navigation';
+import { COLORS } from '../theme';
 
 // ── Brand palette (pulled from the logo: Poké Ball red + sparkle gold) ──────────
 const PALETTE = {
@@ -135,51 +136,51 @@ export const MainMenuScreen: React.FC = () => {
 };
 
 const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#070D1A' },
+  root: { flex: 1, backgroundColor: COLORS.bg },
 
   header: {
     alignItems: 'center',
     justifyContent: 'center',
-    borderBottomWidth: 1.5,
-    borderBottomColor: '#1E293B',
-    backgroundColor: '#0D1525',
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    backgroundColor: COLORS.panel,
   },
 
   list: {
     flexGrow: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 14,
+    gap: 12,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#111827',
+    backgroundColor: COLORS.card,
     borderRadius: 14,
     borderWidth: 2,
-    borderColor: '#1E293B',
+    borderColor: COLORS.border,
     overflow: 'hidden',
-    paddingVertical: 14,
-    paddingRight: 18,
+    paddingVertical: 12,
+    paddingRight: 16,
     width: '100%',
-    maxWidth: 480,
+    maxWidth: 460,
   },
   accentBar: { width: 5, alignSelf: 'stretch' },
   iconCircle: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     borderWidth: 2,
     backgroundColor: 'rgba(15,23,42,0.6)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginHorizontal: 16,
+    marginHorizontal: 14,
   },
-  iconTxt: { fontSize: 22 },
+  iconTxt: { fontSize: 20 },
   textWrap: { flex: 1 },
-  rowLabel: { fontSize: 16, fontWeight: '700', letterSpacing: 2 },
-  rowDesc: { color: '#64748B', fontSize: 11, fontWeight: '500', marginTop: 3 },
-  chevron: { fontSize: 26, fontWeight: '700', marginLeft: 8 },
+  rowLabel: { fontSize: 15, fontWeight: '700', letterSpacing: 2 },
+  rowDesc: { color: COLORS.textMuted, fontSize: 11, fontWeight: '500', marginTop: 3 },
+  chevron: { fontSize: 24, fontWeight: '700', marginLeft: 8 },
 
   version: {
     position: 'absolute',

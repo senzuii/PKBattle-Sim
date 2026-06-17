@@ -36,6 +36,29 @@ export const NATURES: Record<Nature, { plus: NStat | null; minus: NStat | null }
 
 export const NATURE_LIST = Object.keys(NATURES) as Nature[];
 
+/** Stat order for the nature chart axes. */
+export const NATURE_STATS: NStat[] = ['atk', 'def', 'spa', 'spd', 'spe'];
+export const NATURE_STAT_LABELS: Record<NStat, string> = {
+  atk: 'Atk', def: 'Def', spa: 'SpA', spd: 'SpD', spe: 'Spe',
+};
+
+/**
+ * Nature chart: rows = the LOWERED stat (−), columns = the RAISED stat (+),
+ * both in NATURE_STATS order. The diagonal holds the five neutral natures.
+ */
+export const NATURE_CHART: Nature[][] = [
+  // −Atk:  +Atk     +Def      +SpA      +SpD      +Spe
+  ['Hardy',  'Bold',   'Modest', 'Calm',   'Timid'],
+  // −Def
+  ['Lonely', 'Docile', 'Mild',   'Gentle', 'Hasty'],
+  // −SpA
+  ['Adamant','Impish', 'Bashful','Careful','Jolly'],
+  // −SpD
+  ['Naughty','Lax',    'Rash',   'Quirky', 'Naive'],
+  // −Spe
+  ['Brave',  'Relaxed','Quiet',  'Sassy',  'Serious'],
+];
+
 const STAT_LABEL: Record<NStat, string> = {
   atk: 'Attack', def: 'Defense', spa: 'Sp. Atk', spd: 'Sp. Def', spe: 'Speed',
 };

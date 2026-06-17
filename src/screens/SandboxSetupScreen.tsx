@@ -14,6 +14,9 @@ import { MOVES } from '../data/moves';
 import { PRESETS } from '../data/presets';
 import { BattleDifficulty } from '../types/Pokemon';
 import { RootStackParamList } from '../types/Navigation';
+import { COLORS } from '../theme';
+import { ScreenHeader } from '../components/ScreenHeader';
+import { PrimaryButton } from '../components/PrimaryButton';
 
 export const SandboxSetupScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -79,17 +82,12 @@ export const SandboxSetupScreen: React.FC = () => {
 
   return (
     <View style={styles.safeArea}>
-      <View style={styles.topBar}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.navigate('MainMenu')}>
-          <Text style={styles.backBtnText}>← MENU</Text>
-        </TouchableOpacity>
-        <View style={styles.headerCenter}>
-          <Text style={styles.titleText}>SANDBOX SETUP</Text>
-        </View>
-        <View style={styles.formatBadge}>
-          <Text style={styles.formatBadgeText}>NO LIMITS</Text>
-        </View>
-      </View>
+      <ScreenHeader
+        title="SANDBOX SETUP"
+        badge="NO LIMITS"
+        badgeColor={COLORS.purple}
+        onBack={() => navigation.navigate('MainMenu')}
+      />
 
       <ScrollView contentContainerStyle={styles.container}>
         {/* 1. Player Setup */}
@@ -233,6 +231,7 @@ export const SandboxSetupScreen: React.FC = () => {
                   key={diff.key}
                   style={[
                     styles.diffRow,
+                    styles.diffCell,
                     isSelected && styles.diffRowSelected,
                     diff.key === 'cheating' && isSelected && styles.diffCheatingSelected,
                   ]}
@@ -251,28 +250,22 @@ export const SandboxSetupScreen: React.FC = () => {
           </View>
         </View>
 
-        <TouchableOpacity style={styles.startButton} onPress={handleStartBattle}>
-          <Text style={styles.startButtonText}>START SANDBOX BATTLE</Text>
-        </TouchableOpacity>
+        <PrimaryButton
+          label="START SANDBOX BATTLE"
+          color={COLORS.purple}
+          onPress={handleStartBattle}
+          block
+          style={{ marginTop: 6 }}
+        />
       </ScrollView>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#070D1A' },
-  topBar: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingVertical: 12, backgroundColor: '#0D1525', borderBottomWidth: 1.5, borderBottomColor: '#1E293B',
-  },
-  backBtn: { backgroundColor: '#1E293B', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: '#334155' },
-  backBtnText: { color: '#94A3B8', fontWeight: '700', fontSize: 11, letterSpacing: 1 },
-  headerCenter: { alignItems: 'center' },
-  titleText: { fontSize: 18, fontWeight: '700', color: '#F8FAFC', letterSpacing: 2 },
-  formatBadge: { backgroundColor: '#8B5CF6', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 },
-  formatBadgeText: { color: '#FFFFFF', fontSize: 9, fontWeight: '700', letterSpacing: 1 },
-  container: { padding: 15, paddingBottom: 30 },
-  section: { marginBottom: 20 },
+  safeArea: { flex: 1, backgroundColor: COLORS.bg },
+  container: { padding: 14, paddingBottom: 24, gap: 4 },
+  section: { marginBottom: 14 },
   sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   sectionHeader: { fontSize: 11, fontWeight: '600', color: '#64748B', letterSpacing: 1 },
   editBtnText: { color: '#00C3E3', fontSize: 10, fontWeight: '600' },
@@ -299,7 +292,8 @@ const styles = StyleSheet.create({
   presetCardActive: { borderColor: '#FF4554', backgroundColor: 'rgba(255, 69, 84, 0.05)' },
   presetName: { color: '#F8FAFC', fontSize: 14, fontWeight: '600' },
   presetDetail: { color: '#94A3B8', fontSize: 10, marginTop: 4 },
-  difficultyGrid: { gap: 6 },
+  difficultyGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  diffCell: { flex: 1, minWidth: '22%' },
   diffRow: { backgroundColor: '#111827', borderRadius: 8, padding: 10, borderWidth: 1.5, borderColor: '#1E293B' },
   diffRowSelected: { borderColor: '#E2E8F0' },
   diffCheatingSelected: { borderColor: '#FF4554', backgroundColor: 'rgba(255, 69, 84, 0.03)' },

@@ -14,6 +14,7 @@ import {
 import { selectAIMove } from '../engine/ai';
 import { rollGender } from '../engine/battle/Gender';
 import { rollNature } from '../data/natures';
+import type { BatonPassState } from '../engine/battle/TurnEngine';
 
 const GENERATION_STORAGE_KEY   = '@pkbattler_selected_generation';
 const ACTIVE_TEAM_STORAGE_KEY  = '@pkbattler_active_team';
@@ -66,6 +67,7 @@ interface BattleStore {
   playerDamageTaken: number;
   winner: 'player' | 'opponent' | null;
   pendingResult: TurnExecutionResult | null;
+  pendingBatonPass: BatonPassState | null; // stat stages waiting for the player's Baton Pass switch-in
 
   /** Battle-level state: weather, entry hazards, pending Future Sight / Wish */
   field: FieldState;
@@ -125,7 +127,7 @@ const buildBattlePokemon = (customPoke: CustomPokemon): BattlePokemon => {
     baseId: customPoke.speciesId,
     name: base.name,
     types: base.types,
-    gender: rollGender(customPoke.speciesId),
+    gender: customPoke.gender ?? rollGender(customPoke.speciesId),
     nature,
     level: customPoke.level,
     ability: customPoke.ability || base.abilities[0] || 'None',
@@ -143,6 +145,13 @@ const buildBattlePokemon = (customPoke: CustomPokemon): BattlePokemon => {
 
 const hasAlivePokemon = (team: BattlePokemon[], excludeIdx?: number) =>
   team.some((p, i) => i !== excludeIdx && p.currentHp > 0);
+
+// Baton Pass — hand the incoming Pokémon the previous one's stat stages, sub, and Leech Seed.
+const applyBatonPass = (mon: BattlePokemon, bp: BatonPassState): void => {
+  mon.statStages   = { ...bp.statStages };
+  mon.substituteHp = bp.substituteHp;
+  mon.isSeeded     = bp.isSeeded;
+};
 
 // ─── Store ────────────────────────────────────────────────────────────────────
 export const useBattleStore = create<BattleStore>((set, get) => ({
@@ -167,6 +176,7 @@ export const useBattleStore = create<BattleStore>((set, get) => ({
   playerDamageTaken: 0,
   winner:           null,
   pendingResult:    null,
+  pendingBatonPass: null,
   field:            createField(),
 
   playerPokemon:      null,
@@ -434,11 +444,16 @@ export const useBattleStore = create<BattleStore>((set, get) => ({
       newLogs.push(`--- TURN ${turnCount + 1} ---`);
     }
 
-    // Roar / Whirlwind — force the hit side's active Pokémon to switch out
+    // Roar / Whirlwind / U-turn / Baton Pass — force the side's active mon to switch
+    let playerBatonPass: BatonPassState | null = null;
     if (!nextWinner && nextState === 'battle' && pendingResult.forceSwitch) {
       if (pendingResult.forceSwitch === 'opponent') {
         const next = sendNextOpponent();
         if (next) {
+          if (pendingResult.batonPass) {
+            applyBatonPass(next.pokemon, pendingResult.batonPass);
+            newOpponentTeam[next.idx] = next.pokemon;
+          }
           finalOpponentPokemon = next.pokemon;
           finalOpponentActiveIdx = next.idx;
         } else {
@@ -448,6 +463,7 @@ export const useBattleStore = create<BattleStore>((set, get) => ({
         if (hasAlivePokemon(newPlayerTeam, playerActiveIdx)) {
           newPlayerTeam[playerActiveIdx] = resetVolatileState(newPlayerTeam[playerActiveIdx]);
           nextState = 'switch';
+          playerBatonPass = pendingResult.batonPass ?? null; // applied when the player picks
         } else {
           newLogs.push('But it failed!');
         }
@@ -469,6 +485,7 @@ export const useBattleStore = create<BattleStore>((set, get) => ({
       winner: nextWinner,
       gameState: nextState,
       pendingResult: null,
+      pendingBatonPass: playerBatonPass,
     });
   },
 
@@ -509,7 +526,7 @@ export const useBattleStore = create<BattleStore>((set, get) => ({
 
   // ── Forced Send-Out (after faint, no opponent attack) ─────────────────────────
   sendOutPlayerPokemon: (idx) => {
-    const { playerBattleTeam, opponentPokemon, field, logs, turnCount } = get();
+    const { playerBattleTeam, opponentPokemon, field, logs, turnCount, pendingBatonPass } = get();
     const teamPokemon = playerBattleTeam[idx];
     if (!teamPokemon || teamPokemon.currentHp <= 0) return;
 
@@ -519,6 +536,11 @@ export const useBattleStore = create<BattleStore>((set, get) => ({
     // Clone the field: Toxic Spikes absorption mutates hazard state.
     const newField = cloneField(field);
     const newPokemon = { ...teamPokemon };
+    // Baton Pass — inherit the previous Pokémon's stat stages before hazards/abilities.
+    if (pendingBatonPass) {
+      applyBatonPass(newPokemon, pendingBatonPass);
+      newLogs.push(`${newPokemon.name} kept the boosts from the baton!`);
+    }
     if (opponentPokemon) AbilityManager.onSwitchIn(newPokemon, opponentPokemon, newLogs, newField);
     applyEntryHazards(newPokemon, newField.player.hazards, newLogs);
     const newPlayerTeam = playerBattleTeam.map((p, i) => (i === idx ? newPokemon : p));
@@ -527,7 +549,7 @@ export const useBattleStore = create<BattleStore>((set, get) => ({
       newLogs.push(`${newPokemon.name} fainted!`);
       if (hasAlivePokemon(newPlayerTeam, idx)) {
         // Stay in the switch screen so the player picks another Pokémon
-        set({ playerBattleTeam: newPlayerTeam, field: newField, logs: newLogs, gameState: 'switch' });
+        set({ playerBattleTeam: newPlayerTeam, field: newField, logs: newLogs, gameState: 'switch', pendingBatonPass: null });
       } else {
         newLogs.push('All your Pokémon fainted! You lost!');
         set({
@@ -538,6 +560,7 @@ export const useBattleStore = create<BattleStore>((set, get) => ({
           logs: newLogs,
           winner: 'opponent',
           gameState: 'results',
+          pendingBatonPass: null,
         });
       }
       return;
@@ -554,6 +577,7 @@ export const useBattleStore = create<BattleStore>((set, get) => ({
       logs: newLogs,
       turnCount: turnCount + 1,
       gameState: 'battle',
+      pendingBatonPass: null,
     });
   },
 

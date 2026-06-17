@@ -15,7 +15,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useBattleStore } from '../store/useBattleStore';
 import { BattlePokemon, Move, WeatherKind, NonVolatileStatus } from '../types/Pokemon';
-import { HazardLayers, ScreenLayers } from '../engine/battle/Field';
+import { HazardLayers, ScreenLayers, FieldState } from '../engine/battle/Field';
 import { RootStackParamList } from '../types/Navigation';
 import { FrontSprites, BackSprites } from '../assets/Sprites';
 
@@ -147,6 +147,43 @@ const detectInflictedStatus = (line: string): NonVolatileStatus | null => {
   }
   return null;
 };
+
+// A non-volatile status being lifted (wake/thaw/heal/cure). Confusion is volatile,
+// so "snapped out of its confusion" is intentionally excluded.
+const isStatusCureLog = (line: string): boolean =>
+  line.includes('woke up!') ||
+  line.includes('thawed out!') ||
+  line.includes('cured its') ||
+  line.includes('was cured!');
+
+// Parse a "<name>'s <Stat>[ sharply| drastically] rose/fell!" line into a stat
+// key + signed delta, so the HUD stat badges can track the log in real time.
+// Engine labels: Attack/Defense/Sp. Atk/Sp. Def/Speed/Accuracy/Evasion.
+const STAT_LABEL_TO_KEY: Record<string, string> = {
+  'Attack': 'atk', 'Defense': 'def', 'Sp. Atk': 'spa',
+  'Sp. Def': 'spd', 'Speed': 'spe', 'Accuracy': 'accuracy', 'Evasion': 'evasion',
+};
+const STAT_CHANGE_RE = /'s (Attack|Defense|Sp\. Atk|Sp\. Def|Speed|Accuracy|Evasion)( sharply| drastically)? (rose|fell)!/;
+const parseStatChange = (line: string): { stat: string; delta: number } | null => {
+  const m = line.match(STAT_CHANGE_RE);
+  if (!m) return null;
+  const stat = STAT_LABEL_TO_KEY[m[1]];
+  if (!stat) return null;
+  const mag = m[2]?.includes('drastically') ? 3 : m[2]?.includes('sharply') ? 2 : 1;
+  return { stat, delta: m[3] === 'rose' ? mag : -mag };
+};
+const clampStage = (n: number) => Math.max(-6, Math.min(6, n));
+
+// Weather start/end log lines → top-bar weather chip, so it tracks the log.
+const WEATHER_FROM_START: Record<string, WeatherKind> = {
+  'The sunlight turned harsh!': 'Sun',
+  'It started to rain!': 'Rain',
+  'A sandstorm kicked up!': 'Sandstorm',
+  'It started to hail!': 'Hail',
+};
+const WEATHER_END_LINES = new Set([
+  'The sunlight faded.', 'The rain stopped.', 'The sandstorm subsided.', 'The hail stopped.',
+]);
 
 const hurtOpponent = (line: string, name: string) =>
   isHPChangeLog(line) && line.startsWith(name);
@@ -315,10 +352,10 @@ const BannerLine: React.FC<{ text: string; fontSize: number; dim: boolean }> = (
   );
 };
 
-// Per-side narration banner — enemy sits up top, player down low, so each side's
-// events read near its own Pokémon instead of one big shared block. When it clears
-// it fades + slides out (staying mounted on its last lines until the exit finishes).
-const MoveBanner: React.FC<{ lines: BannerEntry[]; fontSize: number; placement: 'top' | 'bottom'; accent: string }> = ({ lines, fontSize, placement, accent }) => {
+// Single narration banner — one shared block whose content + accent colour
+// reflect whichever Pokémon is currently acting (it resets between sides). When
+// it clears it fades + slides out (staying mounted on its last lines until done).
+const MoveBanner: React.FC<{ lines: BannerEntry[]; fontSize: number; accent: string }> = ({ lines, fontSize, accent }) => {
   const fade = useRef(new Animated.Value(0)).current;
   const [render, setRender] = useState<BannerEntry[]>(lines);
 
@@ -340,7 +377,7 @@ const MoveBanner: React.FC<{ lines: BannerEntry[]; fontSize: number; placement: 
       pointerEvents="none"
       style={[
         bnrS.wrap,
-        placement === 'top' ? bnrS.atTop : bnrS.atBottom,
+        bnrS.atBottom,
         { borderColor: accent, opacity: fade },
       ]}
     >
@@ -364,7 +401,6 @@ const bnrS = StyleSheet.create({
     zIndex: 50,
     shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 6, shadowOffset: { width: 0, height: 2 },
   },
-  atTop: { top: 8 },
   atBottom: { bottom: 12 },
   txt: { color: '#F8FAFC', letterSpacing: 0.5, textAlign: 'center' },
 });
@@ -727,9 +763,15 @@ export const BattleScreen: React.FC = () => {
   const [newFromIdx, setNewFromIdx]         = useState<number>(logs.length);
   const [displayPlayer, setDisplayPlayer]   = useState<BattlePokemon | null>(playerPokemon);
   const [displayOpp, setDisplayOpp]         = useState<BattlePokemon | null>(opponentPokemon);
+  // Weather shown in the top bar — tracked separately so it follows the log
+  // lines mid-turn instead of jumping when the turn commits.
+  const [displayWeather, setDisplayWeather] = useState(field.weather);
+  // Hazards / screens shown in the top bar — likewise tracked to the log.
+  const [displayField, setDisplayField]     = useState(field);
   const [popups, setPopups]                 = useState<PopupData[]>([]);
-  const [playerBanner, setPlayerBanner]     = useState<BannerEntry[]>([]);
-  const [enemyBanner, setEnemyBanner]       = useState<BannerEntry[]>([]);
+  // One narration banner; `side` drives its accent colour and resets its lines
+  // whenever the acting Pokémon changes.
+  const [banner, setBanner]                 = useState<{ side: 'player' | 'opponent'; lines: BannerEntry[] } | null>(null);
   const bannerIdRef                         = useRef(0);
   const [totalTimer, setTotalTimer]         = useState(0);
   const [turnTimer, setTurnTimer]           = useState(0);
@@ -764,8 +806,8 @@ export const BattleScreen: React.FC = () => {
 
   // Sync display when not animating
   useEffect(() => {
-    if (!isAnimating) { setDisplayPlayer(playerPokemon); setDisplayOpp(opponentPokemon); }
-  }, [playerPokemon, opponentPokemon, isAnimating]);
+    if (!isAnimating) { setDisplayPlayer(playerPokemon); setDisplayOpp(opponentPokemon); setDisplayWeather(field.weather); setDisplayField(field); }
+  }, [playerPokemon, opponentPokemon, field, isAnimating]);
 
   // Fix opponent sprite switch in
   useEffect(() => {
@@ -873,8 +915,7 @@ export const BattleScreen: React.FC = () => {
     const startIdx       = baseLogs.length;
     let currentVisible   = [...baseLogs];
     setNewFromIdx(startIdx);
-    setPlayerBanner([]);
-    setEnemyBanner([]);
+    setBanner(prev => prev ? { side: prev.side, lines: [] } : null);
 
     let lastDamagedTarget: 'player' | 'opponent' | null = null;
     let lastAttackedTarget: 'player' | 'opponent' | null = null;
@@ -906,8 +947,11 @@ export const BattleScreen: React.FC = () => {
         else side = lastBannerSide;
         lastBannerSide = side;
         const entry: BannerEntry = { id: ++bannerIdRef.current, text: line };
-        if (side === 'player') setPlayerBanner(prev => [...prev, entry]);
-        else setEnemyBanner(prev => [...prev, entry]);
+        // One banner: append while the same side keeps acting, start a fresh
+        // group (clearing the previous side's lines) the moment the turn flips.
+        setBanner(prev => (prev && prev.side === side)
+          ? { side, lines: [...prev.lines, entry] }
+          : { side, lines: [entry] });
       }
 
       // Switch animation handling
@@ -1032,6 +1076,81 @@ export const BattleScreen: React.FC = () => {
         }]);
       }
 
+      // ── Status cured (wake/thaw/heal): clear the HUD badge in sync ──
+      if (isStatusCureLog(line)) {
+        const cureIsPlayer = line.startsWith(currentPlayerName)
+          || (line.includes(currentPlayerName) && !line.includes(currentOppName));
+        if (cureIsPlayer) setDisplayPlayer(prev => prev ? { ...prev, status: undefined } : prev);
+        else setDisplayOpp(prev => prev ? { ...prev, status: undefined } : prev);
+      }
+
+      // ── Weather: track the top-bar chip to its start/end log line ──
+      if (WEATHER_FROM_START[line]) {
+        setDisplayWeather({ kind: WEATHER_FROM_START[line], turnsLeft: 5 });
+      } else if (WEATHER_END_LINES.has(line)) {
+        setDisplayWeather(undefined);
+      }
+
+      // ── Entry hazards & screens: track the top-bar chips to their log lines ──
+      // Hazard lines say "around your team" (player side) / "the opposing team".
+      // Screen lines start with "Your" (player) / "The opponent's".
+      const patchSide = (which: 'player' | 'opponent', fn: (s: FieldState['player']) => FieldState['player']) =>
+        setDisplayField(prev => ({ ...prev, [which]: fn(prev[which]) }));
+      if (line.includes('Pointed stones float in the air around')) {
+        const w = line.includes('your team') ? 'player' : 'opponent';
+        patchSide(w, s => ({ ...s, hazards: { ...s.hazards, stealthRock: true } }));
+      } else if (line.includes('Poison spikes were scattered all around')) {
+        const w = line.includes('your team') ? 'player' : 'opponent';
+        patchSide(w, s => ({ ...s, hazards: { ...s.hazards, toxicSpikes: Math.min(2, s.hazards.toxicSpikes + 1) } }));
+      } else if (line.includes('Spikes were scattered all around')) {
+        const w = line.includes('your team') ? 'player' : 'opponent';
+        patchSide(w, s => ({ ...s, hazards: { ...s.hazards, spikes: Math.min(3, s.hazards.spikes + 1) } }));
+      } else if (line.includes('blew away the hazards!')) {
+        const w = line.startsWith(currentPlayerName) ? 'player' : 'opponent';
+        patchSide(w, s => ({ ...s, hazards: { stealthRock: false, spikes: 0, toxicSpikes: 0 } }));
+      } else if (line.includes("team's Special Defense rose!")) {
+        patchSide(line.startsWith('Your') ? 'player' : 'opponent', s => ({ ...s, screens: { ...s.screens, lightScreen: 5 } }));
+      } else if (line.includes("team's Defense rose!")) {
+        patchSide(line.startsWith('Your') ? 'player' : 'opponent', s => ({ ...s, screens: { ...s.screens, reflect: 5 } }));
+      } else if (line.includes("team's Reflect wore off!")) {
+        patchSide(line.startsWith('Your') ? 'player' : 'opponent', s => ({ ...s, screens: { ...s.screens, reflect: 0 } }));
+      } else if (line.includes("team's Light Screen wore off!")) {
+        patchSide(line.startsWith('Your') ? 'player' : 'opponent', s => ({ ...s, screens: { ...s.screens, lightScreen: 0 } }));
+      }
+
+      // ── Stat stages: track the HUD +/- badges to the exact log line ──
+      // Only attribute when the line names an active Pokémon (skips team-wide
+      // field lines like "Your team's Defense rose!").
+      const statChange = parseStatChange(line);
+      const statIsPlayer = line.startsWith(currentPlayerName);
+      const statIsOpp = line.startsWith(currentOppName);
+      if (statChange && (statIsPlayer || statIsOpp)) {
+        const patch = (p: BattlePokemon): BattlePokemon => ({
+          ...p,
+          statStages: { ...p.statStages, [statChange.stat]: clampStage(((p.statStages as any)[statChange.stat] ?? 0) + statChange.delta) },
+        });
+        if (statIsPlayer) setDisplayPlayer(prev => prev ? patch(prev) : prev);
+        else setDisplayOpp(prev => prev ? patch(prev) : prev);
+      }
+
+      // ── Confusion / Infatuation volatiles: sync the CNF / ♥ badges ──
+      type Vol = BattlePokemon['volatileStatuses'][number];
+      const addVolatile = (p: BattlePokemon, v: Vol): BattlePokemon =>
+        p.volatileStatuses.includes(v) ? p : { ...p, volatileStatuses: [...p.volatileStatuses, v] };
+      const removeVolatile = (p: BattlePokemon, v: Vol): BattlePokemon =>
+        ({ ...p, volatileStatuses: p.volatileStatuses.filter(x => x !== v) });
+
+      if (line.includes('became confused')) {
+        if (line.startsWith(currentPlayerName)) setDisplayPlayer(prev => prev ? addVolatile(prev, 'Confusion') : prev);
+        else setDisplayOpp(prev => prev ? addVolatile(prev, 'Confusion') : prev);
+      } else if (line.includes('snapped out of its confusion')) {
+        if (line.startsWith(currentPlayerName)) setDisplayPlayer(prev => prev ? removeVolatile(prev, 'Confusion') : prev);
+        else setDisplayOpp(prev => prev ? removeVolatile(prev, 'Confusion') : prev);
+      } else if (line.includes('fell in love')) {
+        if (line.startsWith(currentPlayerName)) setDisplayPlayer(prev => prev ? addVolatile(prev, 'Infatuation') : prev);
+        else setDisplayOpp(prev => prev ? addVolatile(prev, 'Infatuation') : prev);
+      }
+
       if (isHPChangeLog(line)) {
         // ── Let the log line sit for a moment so the player can read it ──
         await sleep(LOG_READ_DELAY);
@@ -1101,8 +1220,7 @@ export const BattleScreen: React.FC = () => {
     }
 
     await sleep(POST_TURN_DELAY);
-    setPlayerBanner([]);
-    setEnemyBanner([]);
+    setBanner(prev => prev ? { side: prev.side, lines: [] } : null);
     if (!cancelRef.current) applyPendingTurn();
     setIsAnimating(false);
     isAnimatingRef.current = false;
@@ -1191,11 +1309,11 @@ export const BattleScreen: React.FC = () => {
             totalTimer={totalTimer}
             turnTimer={turnTimer}
             fmtTime={fmtTime}
-            weather={field.weather}
-            playerHazards={field.player.hazards}
-            opponentHazards={field.opponent.hazards}
-            playerScreens={field.player.screens}
-            opponentScreens={field.opponent.screens}
+            weather={displayWeather}
+            playerHazards={displayField.player.hazards}
+            opponentHazards={displayField.opponent.hazards}
+            playerScreens={displayField.player.screens}
+            opponentScreens={displayField.opponent.screens}
             sizes={sizes}
           />
 
@@ -1203,9 +1321,14 @@ export const BattleScreen: React.FC = () => {
             <Image source={{ uri: 'https://play.pokemonshowdown.com/sprites/battlebg/bg-forest.jpg' }} style={s.arenaBg} />
             <View style={s.arenaVignette} />
 
-            {/* Showdown-style narration banners — enemy up top, player down low */}
-            <MoveBanner lines={enemyBanner}  fontSize={sizes.topBarFont + 4} placement="top"    accent="#EF4444" />
-            <MoveBanner lines={playerBanner} fontSize={sizes.topBarFont + 4} placement="bottom" accent="#00C3E3" />
+            {/* Single narration banner — accent colour tracks whose turn it is */}
+            {banner && (
+              <MoveBanner
+                lines={banner.lines}
+                fontSize={sizes.topBarFont + 4}
+                accent={banner.side === 'player' ? '#00C3E3' : '#EF4444'}
+              />
+            )}
 
             <View style={s.enemyHalf}>
               <BattleInfoCard pokemon={dopp} isPlayer={false} team={opponentBattleTeam} activeIdx={opponentActiveIdx} sizes={sizes} />
@@ -1234,14 +1357,14 @@ export const BattleScreen: React.FC = () => {
           <View style={[s.movesArea, { height: controlsHeight }]}>
             {[0, 2].map(start => (
               <View key={start} style={s.movesRow}>
-                {playerPokemon.moves.slice(start, start + 2).map(move => {
-                  const isSelected = selectedMoveId === move.id || (playerPokemon.lockedMove && move.id === playerPokemon.lockedMove.moveId);
-                  const isLockedOut = (!!playerPokemon.lockedMove && move.id !== playerPokemon.lockedMove.moveId)
+                {dp.moves.slice(start, start + 2).map(move => {
+                  const isSelected = selectedMoveId === move.id || (dp.lockedMove && move.id === dp.lockedMove.moveId);
+                  const isLockedOut = (!!dp.lockedMove && move.id !== dp.lockedMove.moveId)
                     || (move.currentPp ?? move.pp) <= 0
-                    || (!!playerPokemon.taunted && playerPokemon.taunted > 0 && move.category === 'Status')
-                    || (playerPokemon.disabled?.moveId === move.id)
-                    || (!!playerPokemon.encore && move.id !== playerPokemon.encore.moveId)
-                    || (!!playerPokemon.torment && playerPokemon.lastMoveUsed === move.id);
+                    || (!!dp.taunted && dp.taunted > 0 && move.category === 'Status')
+                    || (dp.disabled?.moveId === move.id)
+                    || (!!dp.encore && move.id !== dp.encore.moveId)
+                    || (!!dp.torment && dp.lastMoveUsed === move.id);
                   return (
                     <MoveButton
                       key={move.id}

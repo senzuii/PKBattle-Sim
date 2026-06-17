@@ -34,7 +34,7 @@ export interface ScreenState {
 // ─────────────────────────────────────────────────────────────────────────────
 const INVULN_BYPASS: Record<string, { bypassMoves: string[]; doubleDmgMoves: string[] }> = {
   dig:    { bypassMoves: ['earthquake', 'magnitude'],             doubleDmgMoves: ['earthquake', 'magnitude'] },
-  fly:    { bypassMoves: ['gust', 'twister', 'thunder', 'sky_uppercut'], doubleDmgMoves: ['gust', 'twister'] },
+  fly:    { bypassMoves: ['gust', 'twister', 'thunder', 'skyuppercut'], doubleDmgMoves: ['gust', 'twister'] },
   bounce: { bypassMoves: ['gust', 'twister', 'thunder'],          doubleDmgMoves: ['gust', 'twister'] },
   dive:   { bypassMoves: ['surf', 'whirlpool'],                   doubleDmgMoves: ['surf', 'whirlpool'] },
 };
@@ -104,15 +104,19 @@ export function checkMoveHit(
 // ─────────────────────────────────────────────────────────────────────────────
 // Critical Hit Check
 // ─────────────────────────────────────────────────────────────────────────────
-export function checkCriticalHit(move: Move, rng: BattleRng = defaultRng): boolean {
-  const ratio = move.critRatio ?? 1;
+export function checkCriticalHit(move: Move, attacker?: BattlePokemon, rng: BattleRng = defaultRng): boolean {
+  // Crit "stage": high-crit moves +1, Focus Energy +2, Super Luck +1.
+  let stage = (move.critRatio ?? 1) - 1;
+  if (attacker?.focusEnergy) stage += 2;
+  if (attacker?.ability === 'Super Luck') stage += 1;
+
   const probabilities: Record<number, number> = {
-    1: 1 / 24,   // default
-    2: 1 / 8,    // high-crit moves
-    3: 1 / 2,
-    4: 1.0,      // guaranteed
+    0: 1 / 24,   // default
+    1: 1 / 8,    // one boost (high-crit move OR Super Luck)
+    2: 1 / 2,
+    3: 1.0,      // guaranteed (e.g. high-crit + Focus Energy)
   };
-  const prob = probabilities[Math.min(ratio, 4)] ?? 1 / 24;
+  const prob = probabilities[Math.min(stage, 3)] ?? 1 / 24;
   return rng.next() < prob;
 }
 
@@ -210,7 +214,7 @@ function computeCoreDamage(
   screens?: ScreenState,
 ): { damage: number; effectiveness: number; hasStab: boolean; isFixed: boolean } {
   const { type: moveType, power: basePower } = effectiveTypeAndPower(move, weather);
-  const effectiveness = getEffectiveness(moveType, defender.types, attacker.ability === 'Scrappy');
+  const effectiveness = getEffectiveness(moveType, defender.types, attacker.ability === 'Scrappy' || !!defender.foresighted);
   const hasStab = attacker.types.includes(moveType);
 
   if (effectiveness === 0) {
@@ -278,7 +282,7 @@ export function rollDamage(
     return { damage: 0, effectiveness: 1, hasStab: false, isCrit: false };
   }
 
-  const isCrit = checkCriticalHit(move, rng);
+  const isCrit = checkCriticalHit(move, attacker, rng);
   const core = computeCoreDamage(attacker, defender, move, isCrit, weather, screens);
 
   if (core.effectiveness === 0) {

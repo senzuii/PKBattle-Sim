@@ -39,8 +39,10 @@ export interface TurnExecutionResult {
   logs: string[];
   damageDealt: number;
   damageTaken: number;
-  /** Set when Roar/Whirlwind forced the named side's active Pokémon to switch out. */
+  /** Set when Roar/Whirlwind/U-turn/Baton Pass forced the named side to switch out. */
   forceSwitch?: 'player' | 'opponent';
+  /** Stat stages to hand the incoming Pokémon (Baton Pass). */
+  batonPass?: BatonPassState;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -114,6 +116,15 @@ export function resetVolatileState(src: BattlePokemon): BattlePokemon {
   copy.disabled         = undefined;
   copy.encore           = undefined;
   copy.torment          = undefined;
+  copy.bide             = undefined;
+  copy.foresighted      = undefined;
+  copy.focusEnergy      = undefined;
+  // Natural Cure — status clears as the Pokémon leaves the field.
+  if (copy.ability === 'Natural Cure' && copy.status) {
+    copy.status = undefined;
+    copy.statusTurns = 0;
+    copy.toxicCounter = 0;
+  }
   if (copy.mimicBackup) {
     copy.moves[copy.mimicBackup.index] = copy.mimicBackup.move;
     copy.mimicBackup = undefined;
@@ -124,9 +135,17 @@ export function resetVolatileState(src: BattlePokemon): BattlePokemon {
 // ─────────────────────────────────────────────────────────────────────────────
 // Per-side turn state
 // ─────────────────────────────────────────────────────────────────────────────
+/** Stat stages (and a couple of volatiles) handed to the incoming Pokémon by Baton Pass. */
+export interface BatonPassState {
+  statStages: BattlePokemon['statStages'];
+  substituteHp?: number;
+  isSeeded: boolean;
+}
+
 /** Per-turn flags accumulated as actions resolve (e.g. a forced switch from Roar). */
 interface TurnFlags {
   forceSwitch?: 'player' | 'opponent';
+  batonPass?: BatonPassState;
 }
 
 interface Side {
@@ -450,6 +469,18 @@ function performMove(side: Side, other: Side, move: Move, field: FieldState, log
   // Remember this for the opponent's Mimic
   attacker.lastMoveUsed = move.id;
 
+  // ── Baton Pass — retreat, handing stat stages (+ sub / Leech Seed) over ──
+  if (move.id === 'batonpass') {
+    flags.forceSwitch = side.isPlayer ? 'player' : 'opponent';
+    flags.batonPass = {
+      statStages: { ...attacker.statStages },
+      substituteHp: attacker.substituteHp,
+      isSeeded: attacker.isSeeded,
+    };
+    logs.push(`${attacker.name} passed on the baton!`);
+    return;
+  }
+
   // ── Special move handler (Rest, Substitute, Belly Drum, etc.) ───────────
   const specialHandler = getSpecialMoveHandler(move.id);
   if (specialHandler) {
@@ -500,8 +531,8 @@ function performMove(side: Side, other: Side, move: Move, field: FieldState, log
     return;
   }
 
-  // Type immunity (Scrappy lets Normal/Fighting ignore Ghost immunity)
-  if (getEffectiveness(move.type, defender.types, attacker.ability === 'Scrappy') === 0) {
+  // Type immunity (Scrappy / Foresight let Normal/Fighting ignore Ghost immunity)
+  if (getEffectiveness(move.type, defender.types, attacker.ability === 'Scrappy' || !!defender.foresighted) === 0) {
     logs.push('It has no effect...');
     if (move.flags?.selfDestruct) attacker.currentHp = 0;
     return;
@@ -536,6 +567,14 @@ function performMove(side: Side, other: Side, move: Move, field: FieldState, log
     side.damageDealt  += inflicted;
     other.damageTaken += inflicted;
 
+    // Record for Counter / Mirror Coat / Bide (real HP lost this turn, by category)
+    if (inflicted > 0 && defender.substituteHp === undefined) {
+      if (!defender.damageTakenThisTurn) defender.damageTakenThisTurn = { physical: 0, special: 0 };
+      if (move.category === 'Physical')      defender.damageTakenThisTurn.physical += inflicted;
+      else if (move.category === 'Special')  defender.damageTakenThisTurn.special  += inflicted;
+      if (defender.bide) defender.bide.damage += inflicted;
+    }
+
     hitsLanded++;
     if (roll.isCrit) critHit = true;
 
@@ -550,6 +589,20 @@ function performMove(side: Side, other: Side, move: Move, field: FieldState, log
     if (roll.damage > 0 && move.category === 'Physical') {
       AbilityManager.onContactHit(attacker, defender, move, logs);
     }
+
+    // Anger Point — a critical hit maxes the survivor's Attack.
+    if (roll.isCrit && defender.currentHp > 0 && defender.ability === 'Anger Point' && defender.statStages.atk < 6) {
+      defender.statStages.atk = 6;
+      logs.push(`[${defender.name}'s Anger Point]`);
+      logs.push(`${defender.name} maxed its Attack!`);
+    }
+  }
+
+  // Moxie — knocking the target out raises the attacker's Attack.
+  if (hitsLanded > 0 && defender.currentHp <= 0 && attacker.ability === 'Moxie' && attacker.statStages.atk < 6) {
+    attacker.statStages.atk = Math.min(6, attacker.statStages.atk + 1);
+    logs.push(`[${attacker.name}'s Moxie]`);
+    logs.push(`${attacker.name}'s Attack rose!`);
   }
 
   // ── Post-move log messages ───────────────────────────────────────────────
@@ -571,6 +624,19 @@ function performMove(side: Side, other: Side, move: Move, field: FieldState, log
     if (move.flags?.selfSwitch && attacker.currentHp > 0) {
       flags.forceSwitch = side.isPlayer ? 'player' : 'opponent';
       logs.push(`${attacker.name} went back!`);
+    }
+
+    // Rapid Spin — clears the user's side hazards, trap, and Leech Seed.
+    if (move.flags?.rapidSpin && attacker.currentHp > 0) {
+      const myHazards = sideOf(field, side.isPlayer).hazards;
+      if (myHazards.stealthRock || myHazards.spikes > 0 || myHazards.toxicSpikes > 0 || attacker.trap || attacker.isSeeded) {
+        myHazards.stealthRock = false;
+        myHazards.spikes = 0;
+        myHazards.toxicSpikes = 0;
+        attacker.trap = undefined;
+        attacker.isSeeded = false;
+        logs.push(`${attacker.name} blew away the hazards!`);
+      }
     }
   }
 
@@ -628,9 +694,20 @@ export function executeBattleTurn(
     playerSide.pokemon, opponentSide.pokemon, playerAction, opponentAction, rng,
     effectiveWeather(field, playerSide.pokemon, opponentSide.pokemon),
   );
-  const order: [Side, Side] = playerFirst
+  let order: [Side, Side] = playerFirst
     ? [playerSide, opponentSide]
     : [opponentSide, playerSide];
+
+  // Pursuit — if the foe is switching out, Pursuit strikes first at double power.
+  const isPursuit = (s: Side) => s.action.type === 'move' && s.action.move.id === 'pursuit';
+  const isSwitch  = (s: Side) => s.action.type === 'switch';
+  let pursuer: Side | null = null;
+  if (isPursuit(playerSide) && isSwitch(opponentSide)) pursuer = playerSide;
+  else if (isPursuit(opponentSide) && isSwitch(playerSide)) pursuer = opponentSide;
+  if (pursuer && pursuer.action.type === 'move') {
+    pursuer.action = { ...pursuer.action, move: { ...pursuer.action.move, power: pursuer.action.move.power * 2 } };
+    order = pursuer === playerSide ? [playerSide, opponentSide] : [opponentSide, playerSide];
+  }
 
   // First side acts
   performAction(order[0], order[1], field, logs, rng, flags);
@@ -658,6 +735,7 @@ export function executeBattleTurn(
     damageDealt: playerSide.damageDealt,
     damageTaken: playerSide.damageTaken,
     forceSwitch: flags.forceSwitch,
+    batonPass: flags.batonPass,
   };
 }
 

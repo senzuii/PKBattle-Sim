@@ -497,16 +497,17 @@ export const TeamBuilderScreen: React.FC = () => {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: '#070D1A',
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 10,
-    backgroundColor: '#1E293B',
-    borderBottomWidth: 1.5,
-    borderBottomColor: '#334155',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#0D1525',
+    borderBottomWidth: 1,
+    borderBottomColor: '#1E293B',
   },
   headerLeft: {
     flexDirection: 'row',

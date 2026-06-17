@@ -8,7 +8,8 @@ const rapidspin: Move = {
   power: 50,
   accuracy: 100,
   pp: 40,
-  description: 'A high-speed spinning attack.',
+  description: 'A high-speed spinning attack that also frees the user from hazards, traps, and Leech Seed.',
+  flags: { rapidSpin: true },
 };
 
 export default rapidspin;

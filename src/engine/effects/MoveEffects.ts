@@ -198,6 +198,69 @@ function handleTorment(_attacker: BattlePokemon, defender: BattlePokemon, _move:
   logs.push(`${defender.name} was subjected to torment!`);
 }
 
+// Counter / Mirror Coat — return 2× the physical / special damage taken this turn.
+// They run at -5 priority, so the foe's hit has already been recorded.
+function reflectDamage(attacker: BattlePokemon, defender: BattlePokemon, logs: string[], kind: 'physical' | 'special'): void {
+  const taken = attacker.damageTakenThisTurn?.[kind] ?? 0;
+  if (taken <= 0 || defender.currentHp <= 0) { logs.push('But it failed!'); return; }
+  const dmg = taken * 2;
+  defender.currentHp = Math.max(0, defender.currentHp - dmg);
+  logs.push(`${defender.name} took ${dmg} damage!`);
+}
+function handleCounter(attacker: BattlePokemon, defender: BattlePokemon, _move: Move, logs: string[]): void {
+  reflectDamage(attacker, defender, logs, 'physical');
+}
+function handleMirrorCoat(attacker: BattlePokemon, defender: BattlePokemon, _move: Move, logs: string[]): void {
+  reflectDamage(attacker, defender, logs, 'special');
+}
+
+// Bide — stores damage for two turns (the user is locked in), then unleashes 2× total.
+function handleBide(attacker: BattlePokemon, defender: BattlePokemon, _move: Move, logs: string[]): void {
+  if (!attacker.bide) {
+    attacker.bide = { turnsLeft: 2, damage: 0 };
+    attacker.lockedMove = { moveId: 'bide', turn: 2 };
+    logs.push(`${attacker.name} is storing energy!`);
+    return;
+  }
+  attacker.bide.turnsLeft -= 1;
+  if (attacker.bide.turnsLeft > 0) {
+    logs.push(`${attacker.name} is storing energy!`);
+    return;
+  }
+  const dmg = attacker.bide.damage * 2;
+  attacker.bide = undefined;
+  attacker.lockedMove = undefined;
+  logs.push(`${attacker.name} unleashed its stored energy!`);
+  if (dmg > 0 && defender.currentHp > 0) {
+    defender.currentHp = Math.max(0, defender.currentHp - dmg);
+    logs.push(`${defender.name} took ${dmg} damage!`);
+  } else {
+    logs.push('But it failed!');
+  }
+}
+
+// Focus Energy — sharply raises the user's critical-hit ratio.
+function handleFocusEnergy(attacker: BattlePokemon, _defender: BattlePokemon, _move: Move, logs: string[]): void {
+  if (attacker.focusEnergy) { logs.push('But it failed!'); return; }
+  attacker.focusEnergy = true;
+  logs.push(`${attacker.name} is getting pumped!`);
+}
+
+// Haze — wipes all stat changes on both active Pokémon.
+function handleHaze(attacker: BattlePokemon, defender: BattlePokemon, _move: Move, logs: string[]): void {
+  const zero = (): typeof attacker.statStages => ({ atk: 0, def: 0, spa: 0, spd: 0, spe: 0, accuracy: 0, evasion: 0 });
+  attacker.statStages = zero();
+  defender.statStages = zero();
+  logs.push('All stat changes were eliminated!');
+}
+
+// Foresight / Odor Sleuth — lets Normal/Fighting moves hit the target even if Ghost.
+function handleForesight(_attacker: BattlePokemon, defender: BattlePokemon, _move: Move, logs: string[]): void {
+  if (defender.foresighted) { logs.push('But it failed!'); return; }
+  defender.foresighted = true;
+  logs.push(`${defender.name} was identified!`);
+}
+
 // Protect / Detect / Endure — success rate halves with each consecutive use;
 // the counter is reset by TurnEngine whenever the user does anything else.
 function handleProtect(attacker: BattlePokemon, _defender: BattlePokemon, move: Move, logs: string[], rng?: BattleRng): void {
@@ -237,6 +300,13 @@ const SPECIAL_HANDLERS: Record<string, MoveHandler> = {
   disable:      handleDisable,
   encore:       handleEncore,
   torment:      handleTorment,
+  counter:      handleCounter,
+  mirrorcoat:   handleMirrorCoat,
+  bide:         handleBide,
+  haze:         handleHaze,
+  foresight:    handleForesight,
+  odorsleuth:   handleForesight,
+  focusenergy:  handleFocusEnergy,
 };
 
 export function getSpecialMoveHandler(moveId: string): MoveHandler | undefined {
@@ -331,6 +401,21 @@ export function executeMoveEffect(
         : 0;
       if (effect.status === 'Toxic') target.toxicCounter = 0;
       logs.push(`${target.name} ${statusAppliedMessage(effect.status)}`);
+
+      // Synchronize — the holder passes its new status back to the foe.
+      const SYNC_STATUSES: NonVolatileStatus[] = ['Burn', 'Poison', 'Toxic', 'Paralysis'];
+      if (
+        target !== attacker &&
+        target.ability === 'Synchronize' &&
+        SYNC_STATUSES.includes(effect.status) &&
+        !attacker.status &&
+        AbilityManager.canApplyStatus(attacker, effect.status)
+      ) {
+        attacker.status = effect.status;
+        if (effect.status === 'Toxic') attacker.toxicCounter = 0;
+        logs.push(`[${target.name}'s Synchronize]`);
+        logs.push(`${attacker.name} ${statusAppliedMessage(effect.status)}`);
+      }
       break;
     }
 
@@ -413,6 +498,14 @@ export function executeMoveEffect(
       const dmg = ctx.damageDealt ?? 0;
       if (dmg <= 0) break;
       const pct = effect.percent ?? 50;
+      // Liquid Ooze — draining HP hurts the drainer instead of healing it.
+      if (defender.ability === 'Liquid Ooze') {
+        const backlash = Math.max(1, Math.floor((dmg * pct) / 100));
+        attacker.currentHp = Math.max(0, attacker.currentHp - backlash);
+        logs.push(`[${defender.name}'s Liquid Ooze]`);
+        logs.push(`${attacker.name} sucked up the liquid ooze!`);
+        break;
+      }
       const healAmt  = Math.max(1, Math.floor((dmg * pct) / 100));
       const actual   = Math.min(attacker.maxHp - attacker.currentHp, healAmt);
       if (actual > 0) {

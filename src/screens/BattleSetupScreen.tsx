@@ -22,16 +22,12 @@ import { RootStackParamList } from '../types/Navigation';
 import { FrontSprites } from '../assets/Sprites';
 import { isMoveLegalForPokemon } from '../engine/learnset/LearnsetChecker';
 import { getPokemonPoolForGen, isPokemonInGen } from '../data/genDex';
-import { NATURE_LIST, natureSummary } from '../data/natures';
-
-const TYPE_COLORS: Record<string, string> = {
-  Grass: '#4CAF50', Fire: '#FF5722', Water: '#2196F3',
-  Poison: '#9C27B0', Normal: '#9E9E9E', Electric: '#FFC107',
-  Psychic: '#E91E63', Ice: '#00BCD4', Dragon: '#673AB7',
-  Fighting: '#795548', Flying: '#42A5F5', Bug: '#8BC34A',
-  Rock: '#8D6E63', Ground: '#FF8F00', Ghost: '#7E57C2',
-  Dark: '#37474F', Steel: '#607D8B', Fairy: '#F06292',
-};
+import { natureSummary, NATURE_STATS, NATURE_STAT_LABELS, NATURE_CHART } from '../data/natures';
+import { possibleGenders, genderSymbol } from '../engine/battle/Gender';
+import { COLORS, TYPE_COLORS } from '../theme';
+import { ScreenHeader } from '../components/ScreenHeader';
+import { SegmentedTabs } from '../components/SegmentedTabs';
+import { PrimaryButton } from '../components/PrimaryButton';
 
 const MAX_TEAM_SIZE = 6;
 const defaultIvs = { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 };
@@ -86,7 +82,8 @@ const TeamSlot: React.FC<{
   onEdit: () => void;
   onClear: () => void;
   compact?: boolean;
-}> = ({ slotIdx, pokemon, onEdit, onClear, compact }) => {
+  cardWidth?: number;
+}> = ({ slotIdx, pokemon, onEdit, onClear, compact, cardWidth }) => {
   const empty = !pokemon;
   const sprite = pokemon ? FrontSprites[pokemon.speciesId.replace(/[^a-z0-9]/g, '')] : null;
   const pokeData = pokemon ? POKEMON[pokemon.speciesId] : null;
@@ -94,7 +91,12 @@ const TeamSlot: React.FC<{
 
   return (
     <TouchableOpacity
-      style={[slot.card, compact && slot.cardCompact, !empty && slot.cardFilled]}
+      style={[
+        slot.card,
+        compact && slot.cardCompact,
+        !empty && slot.cardFilled,
+        cardWidth != null && { flexGrow: 0, flexShrink: 0, flexBasis: cardWidth, width: cardWidth, minWidth: cardWidth, maxWidth: cardWidth },
+      ]}
       onPress={onEdit}
       activeOpacity={0.75}
     >
@@ -166,9 +168,22 @@ const slot = StyleSheet.create({
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export const BattleSetupScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { height } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const shortScreen = height < 500; // landscape phones — shrink slots & chrome
+  const shortScreen = height < 500; // landscape phones — vertical space is tight
+  const narrow = width < 480;       // portrait phones
+  // The app is orientation-locked to landscape, so a phone reads as shortScreen.
+  // Treat either dimension being small as "phone" and compact the whole UI.
+  const compactUi = shortScreen || narrow;
+
+  // Responsive team grid: enough columns that cards stay small on phones.
+  const teamColumns = compactUi ? 6 : width < 768 ? 4 : 6;
+  const slotMarginPx = compactUi ? 4 : 5; // matches slot.card / cardCompact margins
+  const slotMaxWidth = compactUi ? 108 : 180;
+  const computeSlotWidth = (avail: number) =>
+    Math.max(78, Math.min(slotMaxWidth, Math.floor(avail / teamColumns) - slotMarginPx * 2));
+  const playerSlotWidth = computeSlotWidth(width - 24);   // teamGrid paddingHorizontal 12 * 2
+  const opponentSlotWidth = computeSlotWidth(width - 40); // nested in tabScroll padding 20 * 2
   const {
     opponentChoice, opponentPresetId, difficulty,
     setOpponentChoice, setOpponentPresetId, setDifficulty,
@@ -185,6 +200,8 @@ export const BattleSetupScreen: React.FC = () => {
   const [editSlotIdx, setEditSlotIdx] = useState<number | null>(null);
   const [editingPokemon, setEditingPokemon] = useState<CustomPokemon | null>(null);
   const [speciesPickerVisible, setSpeciesPickerVisible] = useState(false);
+  const [abilityOpen, setAbilityOpen] = useState(false);
+  const [natureOpen, setNatureOpen] = useState(false);
   const [movePickerVisible, setMovePickerVisible] = useState(false);
   const [pickingMoveIndex, setPickingMoveIndex] = useState<number | null>(null);
   const [search, setSearch] = useState('');
@@ -373,33 +390,23 @@ export const BattleSetupScreen: React.FC = () => {
 
   return (
     <View style={s.root}>
-      {/* ── Header ── */}
-      <View style={[s.header, { paddingTop: insets.top + (shortScreen ? 8 : 12), paddingBottom: shortScreen ? 8 : 12, paddingLeft: insets.left + 16, paddingRight: insets.right + 16 }]}>
-        <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()}>
-          <Text style={s.backTxt}>← BACK</Text>
-        </TouchableOpacity>
-        <View style={s.headerCenter}>
-          <Text style={s.headerTitle}>BATTLE SETUP</Text>
-          <View style={s.genBadge}><Text style={s.genBadgeTxt}>{getFormatLabel()}</Text></View>
-        </View>
-        <View style={{ width: 70 }} />
-      </View>
+      <ScreenHeader
+        title="BATTLE SETUP"
+        badge={getFormatLabel()}
+        onBack={() => navigation.goBack()}
+      />
 
-      {/* ── Tab Bar ── */}
-      <View style={s.tabBar}>
-        {([
-          { key: 'team', label: '⚔️  MY TEAM', sub: `${filledSlots} / ${MAX_TEAM_SIZE}` },
-          { key: 'enemy', label: '🤖  OPPONENT', sub: opponentChoice === 'preset' ? 'PRESET' : opponentChoice === 'custom' ? 'CUSTOM' : 'RANDOM' },
-          { key: 'difficulty', label: '⚡  DIFFICULTY', sub: difficulty.toUpperCase() },
-        ] as const).map(tab => {
-          const active = activeTab === tab.key;
-          return (
-            <TouchableOpacity key={tab.key} style={[s.tab, active && s.tabActive]} onPress={() => setActiveTab(tab.key)}>
-              <Text style={[s.tabLabel, active && s.tabLabelActive]}>{tab.label}</Text>
-              <Text style={[s.tabSub, active && s.tabSubActive]}>{tab.sub}</Text>
-            </TouchableOpacity>
-          );
-        })}
+      {/* ── Slim segmented tabs ── */}
+      <View style={s.tabsWrap}>
+        <SegmentedTabs
+          active={activeTab}
+          onChange={(k) => setActiveTab(k as any)}
+          tabs={[
+            { key: 'team',       label: 'MY TEAM',    sub: `${filledSlots}/${MAX_TEAM_SIZE}` },
+            { key: 'enemy',      label: 'OPPONENT',   sub: opponentChoice === 'preset' ? 'PRESET' : opponentChoice === 'custom' ? 'CUSTOM' : 'RANDOM' },
+            { key: 'difficulty', label: 'DIFFICULTY', sub: difficulty.toUpperCase() },
+          ]}
+        />
       </View>
 
       {/* ── Content ── */}
@@ -410,17 +417,15 @@ export const BattleSetupScreen: React.FC = () => {
           <View style={{ flex: 1 }}>
             <View style={s.panelHeader}>
               <Text style={s.panelTitle}>YOUR TEAM</Text>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                <TouchableOpacity style={s.btnSecondary} onPress={handleRandomTeam}>
-                  <Text style={s.btnSecondaryTxt}>🎲 RANDOM TEAM</Text>
-                </TouchableOpacity>
-              </View>
+              <TouchableOpacity style={s.btnSecondary} onPress={handleRandomTeam}>
+                <Text style={s.btnSecondaryTxt}>🎲 RANDOM</Text>
+              </TouchableOpacity>
             </View>
             <ScrollView contentContainerStyle={s.teamGrid} showsVerticalScrollIndicator={false}>
               {quickTeamSlots.map((pokemon, idx) => (
                 <TeamSlot
                   key={idx} slotIdx={idx} pokemon={pokemon}
-                  compact={shortScreen}
+                  compact={compactUi} cardWidth={playerSlotWidth}
                   onEdit={() => openEditModal(idx)}
                   onClear={() => { const n = [...quickTeamSlots]; n[idx] = null; setQuickTeamSlots(n); }}
                 />
@@ -431,7 +436,7 @@ export const BattleSetupScreen: React.FC = () => {
 
         {/* OPPONENT TAB */}
         {activeTab === 'enemy' && (
-          <ScrollView contentContainerStyle={s.tabScroll}>
+          <ScrollView contentContainerStyle={[s.tabScroll, compactUi && s.tabScrollNarrow]}>
             <Text style={s.panelTitle}>OPPONENT TYPE</Text>
             <View style={s.opponentRow}>
               {[
@@ -443,13 +448,13 @@ export const BattleSetupScreen: React.FC = () => {
                 return (
                   <TouchableOpacity
                     key={opt.key}
-                    style={[s.opponentCard, active && s.opponentCardActive]}
+                    style={[s.opponentCard, compactUi && s.opponentCardNarrow, active && s.opponentCardActive]}
                     onPress={() => {
                       setOpponentChoice(opt.key as any);
                       if (opt.key === 'preset' && validPresets.length > 0 && !opponentPresetId) setOpponentPresetId(validPresets[0].id);
                     }}
                   >
-                    <Text style={s.opponentIcon}>{opt.icon}</Text>
+                    <Text style={[s.opponentIcon, compactUi && s.opponentIconNarrow]}>{opt.icon}</Text>
                     <Text style={[s.opponentLabel, active && s.opponentLabelActive]}>{opt.label}</Text>
                     <Text style={s.opponentDesc}>{opt.desc}</Text>
                     {active && <View style={s.opponentCheck}><Text style={s.opponentCheckTxt}>✓</Text></View>}
@@ -504,7 +509,7 @@ export const BattleSetupScreen: React.FC = () => {
                   {quickOpponentTeamSlots.map((pokemon, idx) => (
                     <TeamSlot
                       key={idx} slotIdx={idx} pokemon={pokemon}
-                      compact={shortScreen}
+                      compact={compactUi} cardWidth={opponentSlotWidth}
                       onEdit={() => openEditModal(idx, 'opponent')}
                       onClear={() => { const n = [...quickOpponentTeamSlots]; n[idx] = null; setQuickOpponentTeamSlots(n); }}
                     />
@@ -517,7 +522,7 @@ export const BattleSetupScreen: React.FC = () => {
 
         {/* DIFFICULTY TAB */}
         {activeTab === 'difficulty' && (
-          <ScrollView contentContainerStyle={s.tabScroll}>
+          <ScrollView contentContainerStyle={[s.tabScroll, compactUi && s.tabScrollNarrow]}>
             <Text style={s.panelTitle}>AI DIFFICULTY</Text>
             <View style={s.diffGrid}>
               {[
@@ -530,10 +535,10 @@ export const BattleSetupScreen: React.FC = () => {
                 return (
                   <TouchableOpacity
                     key={d.key}
-                    style={[s.diffCard, shortScreen && s.diffCardCompact, active && { borderColor: d.color, backgroundColor: `${d.color}15` }]}
+                    style={[s.diffCard, shortScreen && s.diffCardCompact, narrow && s.diffCardNarrow, active && { borderColor: d.color, backgroundColor: `${d.color}15` }]}
                     onPress={() => setDifficulty(d.key as any)}
                   >
-                    <Text style={[s.diffIcon, shortScreen && { fontSize: 24 }]}>{d.icon}</Text>
+                    <Text style={[s.diffIcon, shortScreen && { fontSize: 24 }, narrow && { fontSize: 26 }]}>{d.icon}</Text>
                     <Text style={[s.diffLabel, active && { color: d.color }]}>{d.label}</Text>
                     <Text style={s.diffDesc} numberOfLines={shortScreen ? 2 : undefined}>{d.desc}</Text>
                     {active && <View style={[s.diffCheck, { backgroundColor: d.color }]}><Text style={s.diffCheckTxt}>✓</Text></View>}
@@ -545,11 +550,15 @@ export const BattleSetupScreen: React.FC = () => {
         )}
       </View>
 
-      {/* ── Bottom CTA ── */}
-      <View style={[s.bottomBar, { paddingBottom: insets.bottom + (shortScreen ? 8 : 16), paddingTop: shortScreen ? 8 : 16, paddingLeft: insets.left + 16, paddingRight: insets.right + 16 }]}>
-        <TouchableOpacity style={[s.startBtn, shortScreen && { paddingVertical: 12 }, !canStart && s.startBtnDisabled]} onPress={handleStartBattle} disabled={!canStart}>
-          <Text style={[s.startBtnTxt, shortScreen && { fontSize: 14 }]}>⚔️  COMMENCE BATTLE</Text>
-        </TouchableOpacity>
+      {/* ── Compact footer CTA ── */}
+      <View style={[s.footer, { paddingBottom: insets.bottom + 8, paddingLeft: insets.left + 14, paddingRight: insets.right + 14 }]}>
+        <View style={s.footerInfo}>
+          <Text style={s.footerLabel}>{activeTab === 'enemy' ? 'OPPONENT' : activeTab === 'difficulty' ? 'DIFFICULTY' : 'YOUR TEAM'}</Text>
+          <Text style={s.footerValue}>
+            {useRandom ? 'Random loadout' : `${filledSlots}/${MAX_TEAM_SIZE} Pokémon chosen`}
+          </Text>
+        </View>
+        <PrimaryButton label="⚔  COMMENCE BATTLE" onPress={handleStartBattle} disabled={!canStart} />
       </View>
 
       {/* ══════════ EDIT MODAL ══════════ */}
@@ -568,7 +577,7 @@ export const BattleSetupScreen: React.FC = () => {
               </View>
             </View>
 
-            <ScrollView contentContainerStyle={m.editBody}>
+            <ScrollView contentContainerStyle={[m.editBody, compactUi && m.editBodyCompact]}>
               {!editingPokemon?.speciesId ? (
                 <View style={m.emptyState}>
                   <Text style={m.emptyStateEmoji}>🔍</Text>
@@ -581,12 +590,12 @@ export const BattleSetupScreen: React.FC = () => {
               ) : (
                 <>
                   {/* Species Hero */}
-                  <View style={m.heroRow}>
-                    <View style={m.heroSprite}>
-                      <Image source={FrontSprites[editingPokemon.speciesId.replace(/[^a-z0-9]/g, '')]} style={m.heroImg} resizeMode="contain" />
+                  <View style={[m.heroRow, compactUi && m.heroRowCompact]}>
+                    <View style={[m.heroSprite, compactUi && m.heroSpriteCompact]}>
+                      <Image source={FrontSprites[editingPokemon.speciesId.replace(/[^a-z0-9]/g, '')]} style={[m.heroImg, compactUi && m.heroImgCompact]} resizeMode="contain" />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={m.heroName}>{POKEMON[editingPokemon.speciesId]?.name}</Text>
+                      <Text style={[m.heroName, compactUi && m.heroNameCompact]}>{POKEMON[editingPokemon.speciesId]?.name}</Text>
                       <View style={{ flexDirection: 'row', gap: 6, marginTop: 4, marginBottom: 12 }}>
                         {(POKEMON[editingPokemon.speciesId]?.types ?? []).map(t => (
                           <View key={t} style={[m.typePill, { backgroundColor: TYPE_COLORS[t] ?? '#555' }]}>
@@ -594,18 +603,103 @@ export const BattleSetupScreen: React.FC = () => {
                           </View>
                         ))}
                       </View>
-                      <TouchableOpacity style={m.changeSpeciesBtn} onPress={() => { setSearch(''); setSpeciesPickerVisible(true); }}>
-                        <Text style={m.changeSpeciesTxt}>🔄 CHANGE SPECIES</Text>
-                      </TouchableOpacity>
+                      {/* Inline controls: change species · gender · ability dropdown */}
+                      <View style={m.heroControls}>
+                        <TouchableOpacity style={m.changeSpeciesBtn} onPress={() => { setSearch(''); setSpeciesPickerVisible(true); }}>
+                          <Text style={m.changeSpeciesTxt}>🔄 CHANGE</Text>
+                        </TouchableOpacity>
+
+                        {/* Gender toggle */}
+                        {(() => {
+                          const opts = possibleGenders(editingPokemon.speciesId);
+                          if (opts[0] === 'N') {
+                            return <View style={m.heroChip}><Text style={m.heroChipTxt}>Genderless</Text></View>;
+                          }
+                          const cur = editingPokemon.gender && opts.includes(editingPokemon.gender) ? editingPokemon.gender : opts[0];
+                          const color = cur === 'M' ? '#3B82F6' : '#EC4899';
+                          return (
+                            <TouchableOpacity
+                              style={[m.heroChip, { borderColor: color }]}
+                              disabled={opts.length === 1}
+                              onPress={() => setEditingPokemon({ ...editingPokemon, gender: cur === 'M' ? 'F' : 'M' })}
+                            >
+                              <Text style={[m.heroChipTxt, { color }]}>{genderSymbol(cur)} {cur === 'M' ? 'Male' : 'Female'}</Text>
+                            </TouchableOpacity>
+                          );
+                        })()}
+
+                        {/* Ability dropdown */}
+                        <TouchableOpacity style={[m.heroChip, abilityOpen && m.heroChipActive]} onPress={() => { setAbilityOpen(o => !o); setNatureOpen(false); }}>
+                          <Text style={m.heroChipTxt} numberOfLines={1}>{editingPokemon.ability || 'Ability'} {abilityOpen ? '▴' : '▾'}</Text>
+                        </TouchableOpacity>
+
+                        {/* Nature dropdown */}
+                        <TouchableOpacity style={[m.heroChip, natureOpen && m.heroChipActive]} onPress={() => { setNatureOpen(o => !o); setAbilityOpen(false); }}>
+                          <Text style={m.heroChipTxt} numberOfLines={1}>{editingPokemon.nature ?? 'Nature'} {natureOpen ? '▴' : '▾'}</Text>
+                        </TouchableOpacity>
+                      </View>
                     </View>
                   </View>
+
+                  {/* Ability dropdown menu (clean card, full width) */}
+                  {abilityOpen && (
+                    <View style={m.dropdownMenu}>
+                      {(POKEMON[editingPokemon.speciesId]?.abilities ?? ['None']).map(ab => {
+                        const active = editingPokemon.ability === ab;
+                        return (
+                          <TouchableOpacity
+                            key={ab}
+                            style={[m.dropdownItem, active && m.dropdownItemActive]}
+                            onPress={() => { setEditingPokemon({ ...editingPokemon, ability: ab }); setAbilityOpen(false); }}
+                          >
+                            <Text style={[m.dropdownItemTxt, active && { color: '#00C3E3' }]}>{ab}</Text>
+                            {active && <Text style={{ color: '#00C3E3', fontWeight: '700' }}>✓</Text>}
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  )}
+
+                  {/* Nature chart — columns raise (+), rows lower (−) */}
+                  {natureOpen && (
+                    <View style={m.natureChart}>
+                      <View style={m.natureRow}>
+                        <View style={m.natureCorner}><Text style={m.natureAxisTxt}>+ ▸{'\n'}▾ −</Text></View>
+                        {NATURE_STATS.map(st => (
+                          <View key={st} style={m.natureHeadCell}><Text style={m.natureHeadTxt}>+{NATURE_STAT_LABELS[st]}</Text></View>
+                        ))}
+                      </View>
+                      {NATURE_CHART.map((row, ri) => (
+                        <View key={ri} style={m.natureRow}>
+                          <View style={m.natureHeadCell}><Text style={m.natureHeadTxt}>−{NATURE_STAT_LABELS[NATURE_STATS[ri]]}</Text></View>
+                          {row.map((nat, ci) => {
+                            const active = editingPokemon.nature === nat;
+                            const neutral = ri === ci;
+                            return (
+                              <TouchableOpacity
+                                key={nat}
+                                style={[m.natureCell, neutral && m.natureCellNeutral, active && m.natureCellActive]}
+                                onPress={() => { setEditingPokemon({ ...editingPokemon, nature: nat }); setNatureOpen(false); }}
+                              >
+                                <Text style={[m.natureCellTxt, active && { color: '#0F172A' }]} numberOfLines={1}>{nat}</Text>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  {/* Two-column body on phones: info on the left, moves on the right */}
+                  <View style={compactUi ? m.bodyCols : undefined}>
+                  <View style={compactUi ? m.bodyCol : m.bodyColStack}>
 
                   {/* Level & Item */}
                   <View style={m.formGrid}>
                     <View style={m.formField}>
                       <Text style={m.fieldLabel}>LEVEL</Text>
                       <TextInput
-                        style={m.input}
+                        style={[m.input, compactUi && m.inputCompact]}
                         value={String(editingPokemon.level)}
                         keyboardType="number-pad"
                         onChangeText={(v) => {
@@ -618,7 +712,7 @@ export const BattleSetupScreen: React.FC = () => {
                     <View style={m.formField}>
                       <Text style={m.fieldLabel}>HELD ITEM</Text>
                       <TextInput
-                        style={m.input}
+                        style={[m.input, compactUi && m.inputCompact]}
                         value={editingPokemon.heldItem || ''}
                         placeholder="e.g. Leftovers"
                         placeholderTextColor="#475569"
@@ -627,39 +721,19 @@ export const BattleSetupScreen: React.FC = () => {
                     </View>
                   </View>
 
-                  {/* Ability Picker */}
-                  <View style={m.formField}>
-                    <Text style={m.fieldLabel}>ABILITY</Text>
-                    <View style={m.abilityPillWrap}>
-                      {(POKEMON[editingPokemon.speciesId]?.abilities ?? ['None']).map(ab => (
-                        <TouchableOpacity
-                          key={ab}
-                          style={[m.abilityPill, editingPokemon.ability === ab && m.abilityPillActive]}
-                          onPress={() => setEditingPokemon({ ...editingPokemon, ability: ab })}
-                        >
-                          <Text style={[m.abilityPillTxt, editingPokemon.ability === ab && m.abilityPillTxtActive]}>{ab}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </View>
 
-                  {/* Nature Picker */}
+                  {/* Nature summary (choose via the Nature chip / chart above) */}
                   <View style={m.formField}>
                     <Text style={m.fieldLabel}>NATURE</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexDirection: 'row', gap: 6, paddingVertical: 2 }}>
-                      {NATURE_LIST.map(nat => {
-                        const active = editingPokemon.nature === nat;
-                        return (
-                          <TouchableOpacity key={nat} style={[m.abilityPill, active && m.abilityPillActive]} onPress={() => setEditingPokemon({ ...editingPokemon, nature: nat })}>
-                            <Text style={[m.abilityPillTxt, active && m.abilityPillTxtActive]}>{nat}</Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </ScrollView>
-                    <Text style={{ color: '#64748B', fontSize: 10, fontWeight: '500', marginTop: 4 }}>{editingPokemon.nature ? natureSummary(editingPokemon.nature) : 'Random nature (tap to choose one)'}</Text>
+                    <Text style={{ color: '#94A3B8', fontSize: 11, fontWeight: '600' }}>
+                      {editingPokemon.nature ? natureSummary(editingPokemon.nature) : 'Random (pick from the Nature ▾ chart above)'}
+                    </Text>
                   </View>
 
-                  {/* Moves */}
+                  </View>{/* end left column */}
+
+                  {/* Moves (right column) */}
+                  <View style={compactUi ? m.bodyCol : m.bodyColStack}>
                   <View style={m.movesSection}>
                     <View style={m.movesSectionHeader}>
                       <Text style={m.fieldLabel}>MOVES</Text>
@@ -675,7 +749,7 @@ export const BattleSetupScreen: React.FC = () => {
                         return (
                           <TouchableOpacity
                             key={mIdx}
-                            style={[m.moveSlot, move && { borderColor: typeColor + '88' }]}
+                            style={[m.moveSlot, compactUi && m.moveSlotCompact, move && { borderColor: typeColor + '88' }]}
                             onPress={() => { setPickingMoveIndex(mIdx); setMoveSearch(''); setMovePickerVisible(true); }}
                           >
                             {move ? (
@@ -701,6 +775,9 @@ export const BattleSetupScreen: React.FC = () => {
                       })}
                     </View>
                   </View>
+
+                  </View>{/* end right column */}
+                  </View>{/* end two-column body */}
                 </>
               )}
             </ScrollView>
@@ -821,82 +898,71 @@ export const BattleSetupScreen: React.FC = () => {
 
 // ─── Main Screen Styles ───────────────────────────────────────────────────────
 const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#070D1A' },
+  root: { flex: 1, backgroundColor: COLORS.bg },
 
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingVertical: 12,
-    backgroundColor: '#0D1525', borderBottomWidth: 1.5, borderBottomColor: '#1E293B',
-  },
-  backBtn: { backgroundColor: '#1E293B', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: '#334155' },
-  backTxt: { color: '#94A3B8', fontWeight: '700', fontSize: 11, letterSpacing: 1 },
-  headerCenter: { alignItems: 'center', gap: 4 },
-  headerTitle: { color: '#F8FAFC', fontSize: 18, fontWeight: '700', letterSpacing: 2 },
-  genBadge: { backgroundColor: '#FF4554', paddingHorizontal: 10, paddingVertical: 3, borderRadius: 6 },
-  genBadgeTxt: { color: '#FFF', fontSize: 9, fontWeight: '700', letterSpacing: 1.5 },
-
-  tabBar: { flexDirection: 'row', backgroundColor: '#0D1525', borderBottomWidth: 1.5, borderBottomColor: '#1E293B' },
-  tab: { flex: 1, alignItems: 'center', paddingVertical: 12, borderBottomWidth: 3, borderBottomColor: 'transparent' },
-  tabActive: { borderBottomColor: '#00C3E3' },
-  tabLabel: { color: '#475569', fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
-  tabLabelActive: { color: '#00C3E3' },
-  tabSub: { color: '#334155', fontSize: 9, fontWeight: '500', marginTop: 2 },
-  tabSubActive: { color: 'rgba(0,195,227,0.6)' },
+  tabsWrap: { paddingHorizontal: 12, paddingVertical: 8 },
 
   content: { flex: 1 },
-  tabScroll: { padding: 20, gap: 16 },
+  tabScroll: { padding: 14, gap: 12 },
+  tabScrollNarrow: { padding: 12, gap: 10 },
 
-  panelHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
-  panelTitle: { color: '#64748B', fontSize: 11, fontWeight: '700', letterSpacing: 2 },
-  btnSecondary: { backgroundColor: 'rgba(139,92,246,0.15)', borderWidth: 1.5, borderColor: '#8B5CF6', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 10 },
-  btnSecondaryTxt: { color: '#8B5CF6', fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
+  panelHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 14, paddingTop: 8, paddingBottom: 8 },
+  panelTitle: { color: COLORS.textMuted, fontSize: 11, fontWeight: '700', letterSpacing: 2 },
+  btnSecondary: { backgroundColor: 'rgba(139,92,246,0.15)', borderWidth: 1.5, borderColor: COLORS.purple, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 9 },
+  btnSecondaryTxt: { color: COLORS.purple, fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
 
-  teamGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 12, justifyContent: 'center' },
+  teamGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 10, paddingBottom: 8, justifyContent: 'center' },
 
-  opponentRow: { flexDirection: 'row', gap: 12, marginTop: 12 },
-  opponentCard: { flex: 1, backgroundColor: '#111827', borderRadius: 16, borderWidth: 2, borderColor: '#1E293B', padding: 20, alignItems: 'center', gap: 6, position: 'relative', overflow: 'hidden' },
-  opponentCardActive: { borderColor: '#00C3E3', backgroundColor: 'rgba(0,195,227,0.06)' },
-  opponentIcon: { fontSize: 32 },
-  opponentLabel: { color: '#94A3B8', fontSize: 12, fontWeight: '700', letterSpacing: 1 },
-  opponentLabelActive: { color: '#00C3E3' },
-  opponentDesc: { color: '#475569', fontSize: 10, fontWeight: '500', textAlign: 'center' },
-  opponentCheck: { position: 'absolute', top: 10, right: 10, width: 22, height: 22, borderRadius: 11, backgroundColor: '#00C3E3', alignItems: 'center', justifyContent: 'center' },
-  opponentCheckTxt: { color: '#0F172A', fontSize: 12, fontWeight: '700' },
+  opponentRow: { flexDirection: 'row', gap: 10, marginTop: 8 },
+  opponentCard: { flex: 1, backgroundColor: COLORS.card, borderRadius: 14, borderWidth: 2, borderColor: COLORS.border, padding: 14, alignItems: 'center', gap: 5, position: 'relative', overflow: 'hidden' },
+  opponentCardNarrow: { padding: 12, borderRadius: 12, gap: 4 },
+  opponentCardActive: { borderColor: COLORS.cyan, backgroundColor: 'rgba(0,195,227,0.06)' },
+  opponentIcon: { fontSize: 26 },
+  opponentIconNarrow: { fontSize: 24 },
+  opponentLabel: { color: COLORS.textDim, fontSize: 12, fontWeight: '700', letterSpacing: 1 },
+  opponentLabelActive: { color: COLORS.cyan },
+  opponentDesc: { color: COLORS.textFaint, fontSize: 10, fontWeight: '500', textAlign: 'center' },
+  opponentCheck: { position: 'absolute', top: 8, right: 8, width: 20, height: 20, borderRadius: 10, backgroundColor: COLORS.cyan, alignItems: 'center', justifyContent: 'center' },
+  opponentCheckTxt: { color: COLORS.cardAlt, fontSize: 11, fontWeight: '700' },
 
-  presetCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#111827', padding: 16, borderRadius: 12, borderWidth: 2, borderColor: '#1E293B', marginBottom: 8 },
-  presetCardActive: { borderColor: '#FF4554', backgroundColor: 'rgba(255,69,84,0.06)' },
-  presetName: { color: '#F8FAFC', fontSize: 15, fontWeight: '700' },
-  presetSub: { color: '#64748B', fontSize: 11, fontWeight: '500', marginTop: 3 },
-  presetCheckBadge: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#FF4554', alignItems: 'center', justifyContent: 'center' },
-  presetCheckTxt: { color: '#FFF', fontSize: 14, fontWeight: '700' },
-  emptyHint: { color: '#475569', fontStyle: 'italic', textAlign: 'center', padding: 24 },
+  presetCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.card, padding: 12, borderRadius: 12, borderWidth: 2, borderColor: COLORS.border, marginBottom: 8 },
+  presetCardActive: { borderColor: COLORS.red, backgroundColor: 'rgba(255,69,84,0.06)' },
+  presetName: { color: COLORS.text, fontSize: 14, fontWeight: '700' },
+  presetSub: { color: COLORS.textMuted, fontSize: 11, fontWeight: '500', marginTop: 3 },
+  presetCheckBadge: { width: 26, height: 26, borderRadius: 13, backgroundColor: COLORS.red, alignItems: 'center', justifyContent: 'center' },
+  presetCheckTxt: { color: '#FFF', fontSize: 13, fontWeight: '700' },
+  emptyHint: { color: COLORS.textFaint, fontStyle: 'italic', textAlign: 'center', padding: 20 },
 
-  diffGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 12 },
-  diffCard: { flex: 1, minWidth: '46%', backgroundColor: '#111827', borderRadius: 16, padding: 20, borderWidth: 2, borderColor: '#1E293B', alignItems: 'center', gap: 6, position: 'relative', overflow: 'hidden' },
+  diffGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 8 },
+  diffCard: { flex: 1, minWidth: '46%', backgroundColor: COLORS.card, borderRadius: 14, padding: 14, borderWidth: 2, borderColor: COLORS.border, alignItems: 'center', gap: 5, position: 'relative', overflow: 'hidden' },
   // Short landscape: all four in one row, tighter padding
   diffCardCompact: { minWidth: '22%', padding: 12, borderRadius: 12 },
-  diffIcon: { fontSize: 32 },
-  diffLabel: { color: '#94A3B8', fontSize: 13, fontWeight: '700', letterSpacing: 1 },
-  diffDesc: { color: '#475569', fontSize: 10, fontWeight: '500', textAlign: 'center' },
-  diffCheck: { position: 'absolute', top: 10, right: 10, width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  diffCheckTxt: { color: '#FFF', fontSize: 12, fontWeight: '700' },
+  // Narrow portrait: keep two columns but trim padding so cards aren't oversized
+  diffCardNarrow: { padding: 12, borderRadius: 12 },
+  diffIcon: { fontSize: 26 },
+  diffLabel: { color: COLORS.textDim, fontSize: 13, fontWeight: '700', letterSpacing: 1 },
+  diffDesc: { color: COLORS.textFaint, fontSize: 10, fontWeight: '500', textAlign: 'center' },
+  diffCheck: { position: 'absolute', top: 8, right: 8, width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  diffCheckTxt: { color: '#FFF', fontSize: 11, fontWeight: '700' },
 
-  bottomBar: { padding: 16, backgroundColor: '#0D1525', borderTopWidth: 1.5, borderTopColor: '#1E293B' },
-  startBtn: {
-    backgroundColor: '#FF4554', borderRadius: 14, paddingVertical: 18, alignItems: 'center',
-    shadowColor: '#FF4554', shadowOpacity: 0.45, shadowRadius: 16, shadowOffset: { width: 0, height: 6 },
+  // Compact footer: summary on the left, normal-sized CTA on the right.
+  footer: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+    paddingTop: 8, paddingHorizontal: 14,
+    backgroundColor: COLORS.panel, borderTopWidth: 1, borderTopColor: COLORS.border,
   },
-  startBtnDisabled: { opacity: 0.4 },
-  startBtnTxt: { color: '#FFF', fontSize: 16, fontWeight: '700', letterSpacing: 2 },
+  footerInfo: { flex: 1 },
+  footerLabel: { color: COLORS.textFaint, fontSize: 9, fontWeight: '700', letterSpacing: 1.5 },
+  footerValue: { color: COLORS.text, fontSize: 13, fontWeight: '700', marginTop: 2 },
 });
 
 // ─── Edit Modal Styles ────────────────────────────────────────────────────────
 const m = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center', alignItems: 'center', padding: 16 },
-  sheet: { backgroundColor: '#0D1525', borderRadius: 20, borderWidth: 1.5, borderColor: '#1E293B', width: '100%', maxWidth: 640, maxHeight: '92%' },
+  sheet: { backgroundColor: '#0D1525', borderRadius: 18, borderWidth: 1.5, borderColor: '#1E293B', width: '100%', maxWidth: 660, maxHeight: '92%', alignSelf: 'center' },
   sheetHeader: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    padding: 16, borderBottomWidth: 1.5, borderBottomColor: '#1E293B',
+    paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#1E293B',
   },
   sheetTitle: { color: '#F8FAFC', fontSize: 14, fontWeight: '700', letterSpacing: 2 },
   randomBtn: { backgroundColor: 'rgba(0,195,227,0.12)', borderWidth: 1, borderColor: '#00C3E3', paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10 },
@@ -904,30 +970,62 @@ const m = StyleSheet.create({
   closeBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#1E293B', alignItems: 'center', justifyContent: 'center' },
   closeBtnTxt: { color: '#94A3B8', fontSize: 14, fontWeight: '700' },
   editBody: { padding: 20, gap: 20 },
+  editBodyCompact: { padding: 14, gap: 12 },
+  // Two-column body for landscape phones: shorter, wider modal.
+  bodyCols: { flexDirection: 'row', gap: 16 },
+  bodyCol: { flex: 1, gap: 12 },
+  bodyColStack: { gap: 20 },
 
-  emptyState: { alignItems: 'center', paddingVertical: 48, gap: 12 },
-  emptyStateEmoji: { fontSize: 48 },
-  emptyStateTitle: { color: '#F8FAFC', fontSize: 18, fontWeight: '700' },
-  emptyStateDesc: { color: '#64748B', fontSize: 12, fontWeight: '500' },
-  pickBtn: { backgroundColor: '#00C3E3', paddingHorizontal: 28, paddingVertical: 14, borderRadius: 12, marginTop: 8 },
+  emptyState: { alignItems: 'center', paddingVertical: 18, gap: 6 },
+  emptyStateEmoji: { fontSize: 30 },
+  emptyStateTitle: { color: '#F8FAFC', fontSize: 15, fontWeight: '700' },
+  emptyStateDesc: { color: '#64748B', fontSize: 11, fontWeight: '500' },
+  pickBtn: { backgroundColor: '#00C3E3', paddingHorizontal: 22, paddingVertical: 10, borderRadius: 10, marginTop: 4 },
   pickBtnTxt: { color: '#0F172A', fontSize: 13, fontWeight: '700', letterSpacing: 1.5 },
 
   heroRow: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  heroRowCompact: { gap: 12 },
   heroSprite: { width: 100, height: 100, backgroundColor: '#111827', borderRadius: 16, borderWidth: 1.5, borderColor: '#1E293B', alignItems: 'center', justifyContent: 'center' },
+  heroSpriteCompact: { width: 64, height: 64, borderRadius: 12 },
   heroImg: { width: 90, height: 90 },
+  heroImgCompact: { width: 56, height: 56 },
   heroName: { color: '#F8FAFC', fontSize: 22, fontWeight: '700' },
+  heroNameCompact: { fontSize: 16 },
   typePill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
   typePillTxt: { color: '#FFF', fontSize: 9, fontWeight: '700', letterSpacing: 0.5 },
-  changeSpeciesBtn: { backgroundColor: 'rgba(0,195,227,0.12)', borderWidth: 1, borderColor: '#00C3E3', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, alignSelf: 'flex-start' },
+  changeSpeciesBtn: { backgroundColor: 'rgba(0,195,227,0.12)', borderWidth: 1, borderColor: '#00C3E3', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10 },
   changeSpeciesTxt: { color: '#00C3E3', fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
+  heroControls: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
+  heroChip: { backgroundColor: 'rgba(148,163,184,0.1)', borderWidth: 1, borderColor: '#334155', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
+  heroChipActive: { borderColor: '#00C3E3', backgroundColor: 'rgba(0,195,227,0.12)' },
+  heroChipTxt: { color: '#E2E8F0', fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
+
+  // Clean dropdown menu card (ability)
+  dropdownMenu: { alignSelf: 'flex-start', minWidth: 160, marginTop: 8, backgroundColor: '#0B1220', borderWidth: 1, borderColor: '#334155', borderRadius: 10, overflow: 'hidden' },
+  dropdownItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#1E293B' },
+  dropdownItemActive: { backgroundColor: 'rgba(0,195,227,0.1)' },
+  dropdownItemTxt: { color: '#E2E8F0', fontSize: 12, fontWeight: '600' },
+
+  // Nature chart grid
+  natureChart: { marginTop: 8, borderWidth: 1, borderColor: '#1E293B', borderRadius: 10, overflow: 'hidden', backgroundColor: '#0B1220' },
+  natureRow: { flexDirection: 'row' },
+  natureCorner: { flex: 1.1, paddingVertical: 4, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0D1525' },
+  natureAxisTxt: { color: '#64748B', fontSize: 7, fontWeight: '700', textAlign: 'center' },
+  natureHeadCell: { flex: 1.1, paddingVertical: 6, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0D1525', borderWidth: 0.5, borderColor: '#1E293B' },
+  natureHeadTxt: { color: '#94A3B8', fontSize: 8, fontWeight: '800', letterSpacing: 0.3 },
+  natureCell: { flex: 1, paddingVertical: 7, paddingHorizontal: 1, alignItems: 'center', justifyContent: 'center', borderWidth: 0.5, borderColor: '#1E293B' },
+  natureCellNeutral: { backgroundColor: 'rgba(100,116,139,0.12)' },
+  natureCellActive: { backgroundColor: '#00C3E3' },
+  natureCellTxt: { color: '#CBD5E1', fontSize: 8, fontWeight: '600' },
 
   formGrid: { flexDirection: 'row', gap: 12 },
   formField: { flex: 1 },
-  fieldLabel: { color: '#475569', fontSize: 9, fontWeight: '700', letterSpacing: 2, marginBottom: 8 },
+  fieldLabel: { color: '#475569', fontSize: 9, fontWeight: '700', letterSpacing: 2, marginBottom: 6 },
   input: { backgroundColor: '#111827', color: '#F8FAFC', padding: 14, borderRadius: 12, borderWidth: 1.5, borderColor: '#1E293B', fontSize: 14, fontWeight: '600' },
+  inputCompact: { padding: 10, borderRadius: 10, fontSize: 13 },
 
   abilityPillWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  abilityPill: { paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, borderWidth: 1.5, borderColor: '#1E293B', backgroundColor: '#111827' },
+  abilityPill: { paddingHorizontal: 11, paddingVertical: 7, borderRadius: 9, borderWidth: 1.5, borderColor: '#1E293B', backgroundColor: '#111827' },
   abilityPillActive: { borderColor: '#00C3E3', backgroundColor: 'rgba(0,195,227,0.1)' },
   abilityPillTxt: { color: '#64748B', fontSize: 11, fontWeight: '600' },
   abilityPillTxtActive: { color: '#00C3E3' },
@@ -942,6 +1040,7 @@ const m = StyleSheet.create({
     borderWidth: 1.5, borderColor: '#1E293B', minHeight: 72,
     overflow: 'hidden', flexDirection: 'row',
   },
+  moveSlotCompact: { minHeight: 54, borderRadius: 10 },
   moveSlotAccent: { width: 4 },
   moveSlotContent: { flex: 1, padding: 12, justifyContent: 'space-between' },
   emptyMoveTxt: { color: '#334155', fontSize: 12, fontWeight: '500', fontStyle: 'italic', flex: 1, textAlign: 'center', textAlignVertical: 'center', padding: 12 },
@@ -951,8 +1050,8 @@ const m = StyleSheet.create({
   moveCatBadge: { backgroundColor: '#1E293B', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5 },
   moveCatBadgeTxt: { color: '#64748B', fontSize: 8, fontWeight: '700' },
 
-  footer: { padding: 16, borderTopWidth: 1.5, borderTopColor: '#1E293B' },
-  saveBtn: { backgroundColor: '#00C3E3', padding: 16, borderRadius: 14, alignItems: 'center' },
+  footer: { paddingHorizontal: 14, paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#1E293B' },
+  saveBtn: { backgroundColor: '#00C3E3', paddingVertical: 11, borderRadius: 12, alignItems: 'center' },
   saveBtnTxt: { color: '#0F172A', fontSize: 14, fontWeight: '700', letterSpacing: 2 },
 });
 
