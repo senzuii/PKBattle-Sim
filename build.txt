@@ -1,5 +1,0 @@
-standalone
-eas build --profile preview --platform android
-
-dev client
-eas build --profile development --platform android
