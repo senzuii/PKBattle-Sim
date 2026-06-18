@@ -10,6 +10,7 @@ import { BattleScreen } from './src/screens/BattleScreen';
 import { ResultsScreen } from './src/screens/ResultsScreen';
 import { TeamBuilderScreen } from './src/screens/TeamBuilderScreen';
 import { SandboxSetupScreen } from './src/screens/SandboxSetupScreen';
+import { PokemonGalleryScreen } from './src/screens/PokemonGalleryScreen';
 import { RootStackParamList } from './src/types/Navigation';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -34,6 +35,7 @@ export default function App() {
           <Stack.Screen name="Results" component={ResultsScreen} />
           <Stack.Screen name="TeamBuilder" component={TeamBuilderScreen} />
           <Stack.Screen name="SandboxSetup" component={SandboxSetupScreen} />
+          <Stack.Screen name="PokemonGallery" component={PokemonGalleryScreen} />
         </Stack.Navigator>
       </NavigationContainer>
     </SafeAreaProvider>

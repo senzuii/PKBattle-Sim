@@ -6,10 +6,13 @@ import {
   TouchableOpacity,
   ScrollView,
   Animated,
+  Easing,
   Image,
   Modal,
   useWindowDimensions,
 } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
+import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -18,6 +21,35 @@ import { BattlePokemon, Move, WeatherKind, NonVolatileStatus } from '../types/Po
 import { HazardLayers, ScreenLayers, FieldState } from '../engine/battle/Field';
 import { RootStackParamList } from '../types/Navigation';
 import { FrontSprites, BackSprites } from '../assets/Sprites';
+import { AniFrontSprites, AniBackSprites } from '../assets/AnimatedSprites';
+import { Cries } from '../assets/Cries';
+
+// Cry keys are hyphenated (e.g. "charizard-megax"); also index them by a
+// normalized (alphanumeric-only) key so a stripped baseId like "charizardmegax"
+// still resolves.
+const CriesNorm: Record<string, any> = Object.fromEntries(
+  Object.entries(Cries).map(([k, v]) => [k.replace(/[^a-z0-9]/g, ''), v]),
+);
+
+// Resolve a species' cry from its baseId, falling back to the base species when
+// a form (e.g. "charizard-megax") has no cry of its own.
+const cryFor = (baseId?: string): number | undefined => {
+  if (!baseId) return undefined;
+  const id = baseId.toLowerCase();
+  if (Cries[id]) return Cries[id];
+  const parts = id.split('-');
+  while (parts.length > 1) {
+    parts.pop();
+    const key = parts.join('-');
+    if (Cries[key]) return Cries[key];
+  }
+  const norm = id.replace(/[^a-z0-9]/g, '');
+  return CriesNorm[norm];
+};
+
+// expo-image animates GIFs (RN's <Image> won't on Android); wrap it so the
+// existing opacity/translate battle animations still drive it.
+const AnimatedExpoImage = Animated.createAnimatedComponent(ExpoImage);
 
 // ─── Responsive sizing ──────────────────────────────────────────────────────
 interface Sizes {
@@ -49,7 +81,7 @@ const getSizes = (winWidth: number, winHeight: number): Sizes => {
   return {
     compact: winHeight < 520,
     enemySprite: r(82),
-    playerSprite: r(96),
+    playerSprite: r(112),
     hudMinWidth: r(172),
     hudFont: r(10),
     hudNameFont: r(12),
@@ -775,12 +807,20 @@ export const BattleScreen: React.FC = () => {
   const bannerIdRef                         = useRef(0);
   const [totalTimer, setTotalTimer]         = useState(0);
   const [turnTimer, setTurnTimer]           = useState(0);
+  // Measured space available to the battle scene; the arena is locked to 16:9
+  // inside it (letterboxed) so the scene looks identical on every screen size.
+  const [arenaBox, setArenaBox]             = useState({ width: 0, height: 0 });
 
   // Sprite animation values
   const playerSpriteOpacity  = useRef(new Animated.Value(1)).current;
   const playerSpriteX        = useRef(new Animated.Value(0)).current;
+  const playerSpriteY        = useRef(new Animated.Value(0)).current;
   const oppSpriteOpacity     = useRef(new Animated.Value(1)).current;
   const oppSpriteX           = useRef(new Animated.Value(0)).current;
+  const oppSpriteY           = useRef(new Animated.Value(0)).current;
+  // Which side (if any) is mid-faint — clips its sprite at the baseline so the
+  // slide-down reads as sinking into the ground (original-game style).
+  const [faintClip, setFaintClip] = useState<'player' | 'opponent' | null>(null);
 
   const scrollRef        = useRef<ScrollView>(null);
   const cancelRef        = useRef(false);
@@ -788,6 +828,40 @@ export const BattleScreen: React.FC = () => {
   const turnIntervalRef  = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastOpponentIdRef = useRef<string | null>(null);
   const isAnimatingRef   = useRef(false);
+
+  // ── Cries ─────────────────────────────────────────────────────────────────
+  // Separate players per side so an entry cry never cuts the other off. Each
+  // side plays its active Pokémon's cry on send-out (and on battle start).
+  const playerCryRef = useRef<AudioPlayer | null>(null);
+  const oppCryRef    = useRef<AudioPlayer | null>(null);
+  useEffect(() => {
+    setAudioModeAsync({ playsInSilentMode: true }).catch(() => {});
+    playerCryRef.current = createAudioPlayer(null);
+    oppCryRef.current    = createAudioPlayer(null);
+    return () => {
+      playerCryRef.current?.remove(); playerCryRef.current = null;
+      oppCryRef.current?.remove();    oppCryRef.current = null;
+    };
+  }, []);
+
+  const playCry = (ref: React.MutableRefObject<AudioPlayer | null>, baseId?: string) => {
+    const cry = cryFor(baseId);
+    const player = ref.current;
+    if (!cry || !player) return;
+    try { player.replace(cry); player.seekTo(0); player.play(); } catch { /* ignore */ }
+  };
+
+  // Play each side's cry whenever its active Pokémon changes — fires on battle
+  // start (mount) and on every switch-in. The opponent's cry leads, like the
+  // games, with the player's following a beat later.
+  useEffect(() => {
+    if (opponentPokemon) playCry(oppCryRef, opponentPokemon.baseId);
+  }, [opponentPokemon?.baseId]);
+  useEffect(() => {
+    if (!playerPokemon) return;
+    const t = setTimeout(() => playCry(playerCryRef, playerPokemon.baseId), 650);
+    return () => clearTimeout(t);
+  }, [playerPokemon?.baseId]);
 
   // Timers
   useEffect(() => {
@@ -842,31 +916,31 @@ export const BattleScreen: React.FC = () => {
   const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
   // ─── Sprite animations ────────────────────────────────────────────────────────
+  // Faint: the sprite slides straight down and is clipped at its baseline, so it
+  // reads as sinking into the ground — like the original games — rather than just
+  // shaking and fading. The enclosing clip box (faintClip) crops everything below
+  // the baseline as the sprite descends.
   const animateFaint = (target: 'player' | 'opponent') => new Promise<void>(resolve => {
-    const opacityRef = target === 'player' ? playerSpriteOpacity : oppSpriteOpacity;
-    const xRef       = target === 'player' ? playerSpriteX       : oppSpriteX;
-    Animated.sequence([
-      // Shake left-right
-      Animated.sequence([
-        Animated.timing(xRef, { toValue: -8, duration: 60, useNativeDriver: true }),
-        Animated.timing(xRef, { toValue:  8, duration: 60, useNativeDriver: true }),
-        Animated.timing(xRef, { toValue: -8, duration: 60, useNativeDriver: true }),
-        Animated.timing(xRef, { toValue:  0, duration: 60, useNativeDriver: true }),
-      ]),
-      // Flash and fade
-      Animated.timing(opacityRef, { toValue: 0.2, duration: 80, useNativeDriver: true }),
-      Animated.timing(opacityRef, { toValue: 1,   duration: 80, useNativeDriver: true }),
-      Animated.timing(opacityRef, { toValue: 0.2, duration: 80, useNativeDriver: true }),
-      Animated.timing(opacityRef, { toValue: 1,   duration: 80, useNativeDriver: true }),
-      // Final fade out downward
-      Animated.timing(opacityRef, { toValue: 0, duration: FAINT_ANIM_MS, useNativeDriver: true }),
-    ]).start(() => resolve());
+    const yRef   = target === 'player' ? playerSpriteY     : oppSpriteY;
+    const height = target === 'player' ? sizes.playerSprite : sizes.enemySprite;
+    setFaintClip(target);
+    yRef.setValue(0);
+    Animated.timing(yRef, {
+      toValue: height,
+      duration: FAINT_ANIM_MS,
+      easing: Easing.in(Easing.quad),
+      useNativeDriver: true,
+    }).start(() => resolve());
   });
 
   const animateSwitchIn = (target: 'player' | 'opponent') => new Promise<void>(resolve => {
     const opacityRef = target === 'player' ? playerSpriteOpacity : oppSpriteOpacity;
     const xRef       = target === 'player' ? playerSpriteX       : oppSpriteX;
+    const yRef       = target === 'player' ? playerSpriteY       : oppSpriteY;
     const fromX      = target === 'player' ? -80 : 80;
+    // Undo any leftover faint slide/clip before the replacement slides in.
+    if (faintClip === target) setFaintClip(null);
+    yRef.setValue(0);
     opacityRef.setValue(0);
     xRef.setValue(fromX);
     Animated.parallel([
@@ -882,6 +956,43 @@ export const BattleScreen: React.FC = () => {
     Animated.parallel([
       Animated.timing(opacityRef, { toValue: 0,   duration: SWITCH_IN_MS, useNativeDriver: true }),
       Animated.timing(xRef,       { toValue: toX, duration: SWITCH_IN_MS, useNativeDriver: true }),
+    ]).start(() => resolve());
+  });
+
+  // Attacker steps toward its foe and snaps back as a move resolves. Player sits
+  // bottom-left and the opponent top-right, so each lunges diagonally inward.
+  const animateLunge = (attacker: 'player' | 'opponent') => new Promise<void>(resolve => {
+    const xRef = attacker === 'player' ? playerSpriteX : oppSpriteX;
+    const yRef = attacker === 'player' ? playerSpriteY : oppSpriteY;
+    const dx   = attacker === 'player' ? 26 : -26;
+    const dy   = attacker === 'player' ? -20 : 20;
+    Animated.sequence([
+      Animated.parallel([
+        Animated.timing(xRef, { toValue: dx, duration: 110, useNativeDriver: true }),
+        Animated.timing(yRef, { toValue: dy, duration: 110, useNativeDriver: true }),
+      ]),
+      Animated.parallel([
+        Animated.timing(xRef, { toValue: 0, duration: 170, useNativeDriver: true }),
+        Animated.timing(yRef, { toValue: 0, duration: 170, useNativeDriver: true }),
+      ]),
+    ]).start(() => resolve());
+  });
+
+  // Target recoils — a quick flash + side-to-side shake — when a hit lands.
+  const animateHit = (target: 'player' | 'opponent') => new Promise<void>(resolve => {
+    const xRef       = target === 'player' ? playerSpriteX       : oppSpriteX;
+    const opacityRef = target === 'player' ? playerSpriteOpacity : oppSpriteOpacity;
+    Animated.sequence([
+      Animated.parallel([
+        Animated.timing(opacityRef, { toValue: 0.35, duration: 55, useNativeDriver: true }),
+        Animated.timing(xRef,       { toValue: -7,   duration: 55, useNativeDriver: true }),
+      ]),
+      Animated.parallel([
+        Animated.timing(opacityRef, { toValue: 1, duration: 55, useNativeDriver: true }),
+        Animated.timing(xRef,       { toValue: 7, duration: 55, useNativeDriver: true }),
+      ]),
+      Animated.timing(xRef, { toValue: -4, duration: 55, useNativeDriver: true }),
+      Animated.timing(xRef, { toValue: 0,  duration: 55, useNativeDriver: true }),
     ]).start(() => resolve());
   });
 
@@ -988,7 +1099,9 @@ export const BattleScreen: React.FC = () => {
       if (line.includes('used')) {
         const attackerIsPlayer = line.startsWith(currentPlayerName);
         lastAttackedTarget = attackerIsPlayer ? 'opponent' : 'player';
-        // Let the move name sit on its own before the damage line replaces it
+        // Lunge the attacker forward, then let the move name sit on its own
+        // before the damage line replaces it.
+        await animateLunge(attackerIsPlayer ? 'player' : 'opponent');
         await sleep(MOVE_HOLD_DELAY);
         if (cancelRef.current) break;
       }
@@ -1167,6 +1280,8 @@ export const BattleScreen: React.FC = () => {
           } else {
             runningOppHp = result.opponent.currentHp;
           }
+          // Shake the target on a direct move hit (overlaps the HP-bar drop).
+          if (line.includes('took') && line.includes('damage')) animateHit('opponent');
           setDisplayOpp(prev => prev ? { ...prev, currentHp: runningOppHp } : prev);
           const delta = before - runningOppHp;
           if (delta > 0) {
@@ -1180,6 +1295,8 @@ export const BattleScreen: React.FC = () => {
           } else {
             runningPlayerHp = result.player.currentHp;
           }
+          // Shake the target on a direct move hit (overlaps the HP-bar drop).
+          if (line.includes('took') && line.includes('damage')) animateHit('player');
           setDisplayPlayer(prev => prev ? { ...prev, currentHp: runningPlayerHp } : prev);
           const delta = before - runningPlayerHp;
           if (delta > 0) {
@@ -1289,14 +1406,31 @@ export const BattleScreen: React.FC = () => {
   const SUBSTITUTE_FRONT = { uri: 'https://play.pokemonshowdown.com/sprites/substitutes/gen5/substitute.png' };
   const SUBSTITUTE_BACK  = { uri: 'https://play.pokemonshowdown.com/sprites/substitutes/gen5-back/substitute.png' };
 
+  // Prefer the animated GIF; fall back to the static PNG when a species has no
+  // animated sprite, then to bulbasaur as a last resort.
   const playerSprite  = dp.substituteHp !== undefined
     ? SUBSTITUTE_BACK
-    : (BackSprites[dp.baseId.toLowerCase().replace(/[^a-z0-9]/g, '')]   ?? BackSprites['bulbasaur']);
+    : (AniBackSprites[dp.baseId.toLowerCase().replace(/[^a-z0-9]/g, '')]
+        ?? BackSprites[dp.baseId.toLowerCase().replace(/[^a-z0-9]/g, '')]
+        ?? BackSprites['bulbasaur']);
   const oppSprite     = dopp.substituteHp !== undefined
     ? SUBSTITUTE_FRONT
-    : (FrontSprites[dopp.baseId.toLowerCase().replace(/[^a-z0-9]/g, '')] ?? FrontSprites['bulbasaur']);
+    : (AniFrontSprites[dopp.baseId.toLowerCase().replace(/[^a-z0-9]/g, '')]
+        ?? FrontSprites[dopp.baseId.toLowerCase().replace(/[^a-z0-9]/g, '')]
+        ?? FrontSprites['bulbasaur']);
   const canFight      = !!selectedMoveId && !isAnimating && gameState === 'battle';
   const isForcedSwitch = gameState === 'switch';
+
+  // Largest 16:9 rectangle that fits the measured battle-scene area. Width-bound
+  // first, then clamp by height — whichever limits, the other axis follows so the
+  // arena keeps a constant 16:9 shape (the wrapper fills any leftover with bars).
+  const ARENA_RATIO = 16 / 9;
+  let arenaW = arenaBox.width;
+  let arenaH = arenaBox.width / ARENA_RATIO;
+  if (arenaH > arenaBox.height) {
+    arenaH = arenaBox.height;
+    arenaW = arenaBox.height * ARENA_RATIO;
+  }
 
   return (
     <View style={s.safeArea}>
@@ -1317,7 +1451,14 @@ export const BattleScreen: React.FC = () => {
             sizes={sizes}
           />
 
-          <View style={[s.arena, { flex: 1 }]}>
+          <View
+            style={s.arenaWrap}
+            onLayout={e => {
+              const { width, height } = e.nativeEvent.layout;
+              setArenaBox(prev => (prev.width === width && prev.height === height) ? prev : { width, height });
+            }}
+          >
+          <View style={[s.arena, { width: arenaW, height: arenaH }]}>
             <Image source={{ uri: 'https://play.pokemonshowdown.com/sprites/battlebg/bg-forest.jpg' }} style={s.arenaBg} />
             <View style={s.arenaVignette} />
 
@@ -1334,7 +1475,9 @@ export const BattleScreen: React.FC = () => {
               <BattleInfoCard pokemon={dopp} isPlayer={false} team={opponentBattleTeam} activeIdx={opponentActiveIdx} sizes={sizes} />
               <View style={s.spriteWrapEnemy}>
                 <View style={[s.baseShadow, { width: sizes.enemySprite * 0.7 }]} />
-                <Animated.Image source={oppSprite} style={[{ width: sizes.enemySprite, height: sizes.enemySprite, zIndex: 2 }, { opacity: oppSpriteOpacity, transform: [{ translateX: oppSpriteX }] }]} resizeMode="contain" />
+                <View style={[s.spriteClip, { width: sizes.enemySprite, height: sizes.enemySprite }, faintClip === 'opponent' && s.spriteClipOn]}>
+                  <AnimatedExpoImage source={oppSprite} style={[{ width: '100%', height: '100%' }, { opacity: oppSpriteOpacity, transform: [{ translateX: oppSpriteX }, { translateY: oppSpriteY }] }]} contentFit="contain" contentPosition="bottom" cachePolicy="memory-disk" />
+                </View>
                 {popups.filter(p => p.target === 'opponent').map(p => (
                   <PopupAnimation key={p.id} popup={p} onComplete={id => setPopups(curr => curr.filter(x => x.id !== id))} />
                 ))}
@@ -1345,12 +1488,15 @@ export const BattleScreen: React.FC = () => {
               <BattleInfoCard pokemon={dp} isPlayer={true} team={playerBattleTeam} activeIdx={playerActiveIdx} sizes={sizes} />
               <View style={s.spriteWrapPlayer}>
                 <View style={[s.baseShadow, { width: sizes.playerSprite * 0.7 }]} />
-                <Animated.Image source={playerSprite} style={[{ width: sizes.playerSprite, height: sizes.playerSprite, zIndex: 2 }, { opacity: playerSpriteOpacity, transform: [{ translateX: playerSpriteX }] }]} resizeMode="contain" />
+                <View style={[s.spriteClip, { width: sizes.playerSprite, height: sizes.playerSprite }, faintClip === 'player' && s.spriteClipOn]}>
+                  <AnimatedExpoImage source={playerSprite} style={[{ width: '100%', height: '100%' }, { opacity: playerSpriteOpacity, transform: [{ translateX: playerSpriteX }, { translateY: playerSpriteY }] }]} contentFit="contain" contentPosition="bottom" cachePolicy="memory-disk" />
+                </View>
                 {popups.filter(p => p.target === 'player').map(p => (
                   <PopupAnimation key={p.id} popup={p} onComplete={id => setPopups(curr => curr.filter(x => x.id !== id))} />
                 ))}
               </View>
             </View>
+          </View>
           </View>
 
           {/* Moves fill the bottom of the battle column */}
@@ -1458,8 +1604,10 @@ const s = StyleSheet.create({
   leftColumn:  { flex: 3.4, flexDirection: 'column' },
   rightColumn: { flex: 1, flexDirection: 'column', borderLeftWidth: 2, borderLeftColor: '#334155' },
 
-  // Arena
-  arena: { flex: 6, position: 'relative', overflow: 'hidden', backgroundColor: '#8ea679' },
+  // Arena — wrapper claims the free space and centers a 16:9 scene inside it,
+  // so the battle scene itself stays a constant shape on every screen size.
+  arenaWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0f172a' },
+  arena: { position: 'relative', overflow: 'hidden', backgroundColor: '#8ea679' },
   arenaBg: { position: 'absolute', width: '100%', height: '100%', opacity: 0.8 },
   arenaVignette: { position: 'absolute', width: '100%', height: '100%', backgroundColor: 'transparent', borderWidth: 24, borderColor: 'rgba(0,0,0,0.18)' },
 
@@ -1467,9 +1615,14 @@ const s = StyleSheet.create({
   spriteWrapEnemy: { position: 'relative', alignItems: 'center', justifyContent: 'center' },
 
   playerHalf: { position: 'absolute', bottom: 10, left: 12, alignItems: 'center', flexDirection: 'column' },
-  spriteWrapPlayer: { position: 'relative', alignItems: 'center', justifyContent: 'flex-end', paddingBottom: 10 },
+  spriteWrapPlayer: { position: 'relative', alignItems: 'center', justifyContent: 'center' },
 
   baseShadow: { position: 'absolute', bottom: 0, height: 16, backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 50, transform: [{ scaleX: 1.4 }], zIndex: 1 },
+  // Holds the sprite; clips it at the baseline only while fainting so the
+  // slide-down sinks into the ground. Stays 'visible' otherwise so lunge/hit
+  // movement isn't cut off.
+  spriteClip: { zIndex: 2, alignItems: 'center', justifyContent: 'flex-end' },
+  spriteClipOn: { overflow: 'hidden' },
 
   // Moves dock at the bottom of the battle column; actions at the bottom of the log column
   movesArea:  { backgroundColor: '#1e293b', borderTopWidth: 2, borderTopColor: '#334155', padding: 8, gap: 6 },

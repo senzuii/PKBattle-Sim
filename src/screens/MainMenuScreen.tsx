@@ -57,6 +57,16 @@ const MENU_ITEMS = [
       nav.navigate('TeamBuilder', { target: 'player' });
     },
   },
+  {
+    key: 'gallery',
+    icon: '🖼️',
+    label: 'SPRITE GALLERY',
+    desc: 'Browse the animated Pokémon sprites',
+    color: '#A78BFA',
+    onPress: (nav: NativeStackNavigationProp<RootStackParamList>) => {
+      nav.navigate('PokemonGallery');
+    },
+  },
 ] as const;
 
 export const MainMenuScreen: React.FC = () => {

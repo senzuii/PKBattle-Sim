@@ -24,6 +24,10 @@
       "eas": {
         "projectId": "1ab30a9b-0ebe-406b-a7bd-a3f000540bad"
       }
-    }
+    },
+    "plugins": [
+      "expo-image",
+      "expo-audio"
+    ]
   }
 }
