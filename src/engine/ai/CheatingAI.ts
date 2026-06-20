@@ -1,7 +1,7 @@
 import { BattlePokemon, Move } from '../../types/Pokemon';
 import { getEffectiveness } from '../../types/TypeChart';
 import { getHardAIMove } from './HardAI';
-import { usableMoves } from './common';
+import { usableMoves, AIContext } from './common';
 
 /**
  * Cheating (Omniscient) AI:
@@ -17,7 +17,8 @@ import { usableMoves } from './common';
 export function getCheatingAIMove(
   aiPokemon: BattlePokemon,
   playerPokemon: BattlePokemon,
-  playerSelectedMove: Move
+  playerSelectedMove: Move,
+  ctx: AIContext = {}
 ): Move {
   const moves = usableMoves(aiPokemon);
 
@@ -57,6 +58,6 @@ export function getCheatingAIMove(
     }
   }
 
-  // Behave normally (Hard AI)
-  return getHardAIMove(aiPokemon, playerPokemon);
+  // Behave normally (Hard AI) — field-aware
+  return getHardAIMove(aiPokemon, playerPokemon, ctx);
 }

@@ -7,4 +7,5 @@ export type RootStackParamList = {
   TeamBuilder: { target: 'player' | 'opponent' } | undefined;
   SandboxSetup: undefined;
   PokemonGallery: undefined;
+  Settings: undefined;
 };

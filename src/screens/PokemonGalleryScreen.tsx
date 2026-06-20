@@ -4,7 +4,7 @@
 // animate (RN's built-in <Image> won't animate GIFs on Android). Tap a card to
 // play that species' cry (expo-audio). Reach it from Main Menu → "SPRITE GALLERY".
 // ─────────────────────────────────────────────────────────────────────────────
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useDeferredValue, useCallback, memo } from 'react';
 import {
   View,
   Text,
@@ -39,6 +39,29 @@ const cryFor = (id: string): number | undefined => {
 
 const prettyName = (id: string) =>
   id.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+
+// Memoized grid cell: only re-renders when its own props change, so filtering /
+// scrolling doesn't reconcile every visible GIF on each keystroke.
+const GalleryCard = memo<{
+  id: string;
+  source: any;
+  tile: number;
+  hasCry: boolean;
+  onPlay: (id: string) => void;
+}>(({ id, source, tile, hasCry, onPlay }) => (
+  <TouchableOpacity style={[s.card, { width: tile }]} activeOpacity={0.7} onPress={() => onPlay(id)}>
+    <View style={[s.spriteBox, { height: tile - 4 }]}>
+      <Image
+        source={source}
+        style={{ width: '100%', height: '100%' }}
+        contentFit="contain"
+        cachePolicy="memory-disk"
+      />
+      {hasCry && <Text style={s.cryIcon}>🔊</Text>}
+    </View>
+    <Text style={s.name} numberOfLines={1}>{prettyName(id)}</Text>
+  </TouchableOpacity>
+));
 
 // National dex number for a sprite id. Forms (e.g. "abomasnow-mega") usually
 // have their own Pokedex entry; cosmetic ones (e.g. "abomasnow-f") don't, so we
@@ -78,7 +101,8 @@ export const PokemonGalleryScreen: React.FC = () => {
     return () => { player.remove(); playerRef.current = null; };
   }, []);
 
-  const playCry = (id: string) => {
+  // Stable across renders (only touches refs) so memoized cards don't re-render.
+  const playCry = useCallback((id: string) => {
     const cry = cryFor(id);
     const player = playerRef.current;
     if (!cry || !player) return;
@@ -87,7 +111,7 @@ export const PokemonGalleryScreen: React.FC = () => {
       player.seekTo(0);
       player.play();
     } catch { /* ignore rapid re-taps */ }
-  };
+  }, []);
 
   const set = side === 'front' ? AniFrontSprites : AniBackSprites;
   // Showdown gives CAP (fan-made) and Pokéstar Studios mons negative dex numbers,
@@ -96,10 +120,12 @@ export const PokemonGalleryScreen: React.FC = () => {
     () => Object.keys(set).filter((id) => { const n = dexNum(id); return n >= 1 && n < 99999; }).sort(byDex),
     [set],
   );
+  // Defer search so the TextInput never stutters while the big grid re-filters.
+  const deferredQuery = useDeferredValue(query);
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = deferredQuery.trim().toLowerCase();
     return q ? ids.filter((id) => id.includes(q)) : ids;
-  }, [ids, query]);
+  }, [ids, deferredQuery]);
 
   // Responsive grid: aim for ~110px tiles.
   const gutter = 10;
@@ -153,21 +179,17 @@ export const PokemonGalleryScreen: React.FC = () => {
         columnWrapperStyle={{ gap: gutter }}
         ItemSeparatorComponent={() => <View style={{ height: gutter }} />}
         initialNumToRender={24}
+        maxToRenderPerBatch={24}
         windowSize={5}
         removeClippedSubviews
         renderItem={({ item }) => (
-          <TouchableOpacity style={[s.card, { width: tile }]} activeOpacity={0.7} onPress={() => playCry(item)}>
-            <View style={[s.spriteBox, { height: tile - 4 }]}>
-              <Image
-                source={set[item]}
-                style={{ width: '100%', height: '100%' }}
-                contentFit="contain"
-                cachePolicy="memory-disk"
-              />
-              {cryFor(item) != null && <Text style={s.cryIcon}>🔊</Text>}
-            </View>
-            <Text style={s.name} numberOfLines={1}>{prettyName(item)}</Text>
-          </TouchableOpacity>
+          <GalleryCard
+            id={item}
+            source={set[item]}
+            tile={tile}
+            hasCry={cryFor(item) != null}
+            onPlay={playCry}
+          />
         )}
         ListEmptyComponent={<Text style={s.empty}>No sprites match “{query}”.</Text>}
       />

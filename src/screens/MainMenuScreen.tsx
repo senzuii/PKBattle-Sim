@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useBattleStore } from '../store/useBattleStore';
+import { useSettingsStore } from '../store/useSettingsStore';
 import { RootStackParamList } from '../types/Navigation';
 import { COLORS } from '../theme';
 
@@ -67,11 +68,22 @@ const MENU_ITEMS = [
       nav.navigate('PokemonGallery');
     },
   },
+  {
+    key: 'settings',
+    icon: '⚙️',
+    label: 'SETTINGS',
+    desc: 'Sound and battle speed',
+    color: '#64748B',
+    onPress: (nav: NativeStackNavigationProp<RootStackParamList>) => {
+      nav.navigate('Settings');
+    },
+  },
 ] as const;
 
 export const MainMenuScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { loadPersistedData } = useBattleStore();
+  const loadSettings = useSettingsStore(s => s.loadSettings);
   const [loading, setLoading] = useState(true);
   const { height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -81,7 +93,7 @@ export const MainMenuScreen: React.FC = () => {
 
   useEffect(() => {
     const init = async () => {
-      await loadPersistedData();
+      await Promise.all([loadPersistedData(), loadSettings()]);
       setLoading(false);
     };
     init();

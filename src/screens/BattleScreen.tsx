@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   Easing,
   Image,
   Modal,
+  InteractionManager,
   useWindowDimensions,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
@@ -17,6 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useBattleStore } from '../store/useBattleStore';
+import { useSettingsStore, SPEED_FACTOR } from '../store/useSettingsStore';
 import { BattlePokemon, Move, WeatherKind, NonVolatileStatus } from '../types/Pokemon';
 import { HazardLayers, ScreenLayers, FieldState } from '../engine/battle/Field';
 import { RootStackParamList } from '../types/Navigation';
@@ -152,16 +154,36 @@ const MOVE_HOLD_DELAY  = 360;  // extra beat so the move name shows before its d
 const LOG_FADE_MS     = 280;
 const FAINT_ANIM_MS   = 700;
 const SWITCH_IN_MS    = 500;
+const REVEAL_MS       = 560;   // Black/White-style send-out: scale-up + drop
+// Only the most recent lines are kept mounted. The log auto-scrolls to the end,
+// so older lines beyond this window are off-screen anyway — capping bounds the
+// number of mounted views (and memory) in a long battle.
+const LOG_RENDER_CAP  = 120;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+// Lines the engine emits with an explicit amount ("X took 25 damage!",
+// "X lost 30 HP!"). Every direct hit, hazard, trap and Future Sight pairs its
+// flavor line with one of these — so the numbered line is the source of truth.
+const NUMBERED_HP_RE = /(?:took|lost) (\d+) (?:damage|HP)/i;
+
+// Numberless chip / drain / recoil lines the engine emits WITHOUT a paired
+// "took N" line. These have no amount in the log, so they must read the bar off
+// the engine's final HP. (Flavor lines that DO have a paired "took N" — trap's
+// "is hurt by Wrap!", spikes' "was hurt by the spikes!", Stealth Rock — are
+// deliberately excluded here so they don't double-count against the numbered line.)
+const isNumberlessChip = (line: string) =>
+  line.includes('was hurt by its') ||         // burn / poison status chip
+  line.includes('was hurt by the poison') ||  // toxic chip
+  line.includes('buffeted by the sandstorm') ||
+  line.includes('pelted by the hail') ||
+  line.includes('sapped by Leech Seed') ||
+  line.includes('was hit with recoil');
+
 const isHPChangeLog = (line: string) =>
-  (line.includes('took') && line.includes('damage')) ||
-  line.includes('hurt by') ||
-  line.includes('sapped by') ||
-  (line.includes('lost') && line.includes('HP')) ||
-  line.includes('recovered HP') ||
-  line.includes('restored its HP') ||
-  line.includes('hit with recoil');
+  NUMBERED_HP_RE.test(line) ||
+  isNumberlessChip(line) ||
+  (line.includes('recovered') && line.includes('HP')) ||
+  line.includes('restored its HP');
 
 // Maps a "<name> was burned!" style log line suffix to the inflicted status.
 const STATUS_LOG_PATTERNS: { match: string; status: NonVolatileStatus }[] = [
@@ -245,7 +267,7 @@ const CATEGORY_GLYPH: Record<string, string> = {
 };
 
 // ─── Pokéball party indicator ──────────────────────────────────────────────────
-const Pokeball: React.FC<{ state: 'active' | 'alive' | 'fainted'; color: string; size: number }> = ({ state, color, size }) => {
+const Pokeball = React.memo<{ state: 'active' | 'alive' | 'fainted'; color: string; size: number }>(({ state, color, size }) => {
   const topColor    = state === 'fainted' ? '#475569' : color;
   const bottomColor = state === 'fainted' ? '#1E293B' : '#F8FAFC';
   return (
@@ -264,26 +286,26 @@ const Pokeball: React.FC<{ state: 'active' | 'alive' | 'fainted'; color: string;
       }]} />
     </View>
   );
-};
+});
 const pbS = StyleSheet.create({
   ball:   { overflow: 'hidden', flexDirection: 'column' },
   band:   { position: 'absolute', top: '50%', left: 0, right: 0, height: 1.5, marginTop: -0.75 },
   center: { position: 'absolute', top: '50%', left: '50%', borderWidth: 1 },
 });
 
-const PartyIndicator: React.FC<{ team: BattlePokemon[]; activeIdx: number; color: string; size?: number }> = ({ team, activeIdx, color, size = 12 }) => (
+const PartyIndicator = React.memo<{ team: BattlePokemon[]; activeIdx: number; color: string; size?: number }>(({ team, activeIdx, color, size = 12 }) => (
   <View style={piS.row}>
     {team.map((p, i) => (
       <Pokeball key={i} size={size} color={color} state={p.currentHp > 0 ? (i === activeIdx ? 'active' : 'alive') : 'fainted'} />
     ))}
   </View>
-);
+));
 const piS = StyleSheet.create({
   row: { flexDirection: 'row', gap: 4, marginTop: 4 },
 });
 
 // ─── Field banner (weather + hazards) ──────────────────────────────────────────
-const HazardChips: React.FC<{ hazards: HazardLayers; screens: ScreenLayers }> = ({ hazards, screens }) => {
+const HazardChips = React.memo<{ hazards: HazardLayers; screens: ScreenLayers }>(({ hazards, screens }) => {
   const chips: string[] = [];
   if (hazards.stealthRock) chips.push('🪨');
   if (hazards.spikes > 0) chips.push('📌'.repeat(hazards.spikes));
@@ -292,16 +314,16 @@ const HazardChips: React.FC<{ hazards: HazardLayers; screens: ScreenLayers }> = 
   if (screens.lightScreen > 0) chips.push('✨');
   if (chips.length === 0) return null;
   return <Text style={fbS.hazardTxt}>{chips.join(' ')}</Text>;
-};
+});
 
-const FieldBanner: React.FC<{
+const FieldBanner = React.memo<{
   weather?: { kind: WeatherKind; turnsLeft: number };
   playerHazards: HazardLayers;
   opponentHazards: HazardLayers;
   playerScreens: ScreenLayers;
   opponentScreens: ScreenLayers;
   fontSize: number;
-}> = ({ weather, playerHazards, opponentHazards, playerScreens, opponentScreens, fontSize }) => (
+}>(({ weather, playerHazards, opponentHazards, playerScreens, opponentScreens, fontSize }) => (
   <View style={fbS.wrap}>
     <HazardChips hazards={playerHazards} screens={playerScreens} />
     {weather && (
@@ -312,7 +334,7 @@ const FieldBanner: React.FC<{
     )}
     <HazardChips hazards={opponentHazards} screens={opponentScreens} />
   </View>
-);
+));
 const fbS = StyleSheet.create({
   wrap: { flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'center', flex: 1 },
   weatherChip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(15,23,42,0.6)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, borderWidth: 1, borderColor: '#334155' },
@@ -322,30 +344,50 @@ const fbS = StyleSheet.create({
 });
 
 // ─── Top scoreboard bar ─────────────────────────────────────────────────────────
-const TopBar: React.FC<{
+const fmtTime = (s: number) =>
+  `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+
+const TopBar = React.memo<{
   turnCount: number;
-  totalTimer: number;
-  turnTimer: number;
-  fmtTime: (s: number) => string;
+  gameState: string;
+  isAnimating: boolean;
   weather?: { kind: WeatherKind; turnsLeft: number };
   playerHazards: HazardLayers;
   opponentHazards: HazardLayers;
   playerScreens: ScreenLayers;
   opponentScreens: ScreenLayers;
   sizes: Sizes;
-}> = ({ turnCount, totalTimer, turnTimer, fmtTime, weather, playerHazards, opponentHazards, playerScreens, opponentScreens, sizes }) => (
-  <View style={[tbS.bar, { paddingVertical: sizes.compact ? 3 : 5 }]}>
-    <View style={tbS.turnBadge}>
-      <Text style={[tbS.turnTxt, { fontSize: sizes.topBarFont }]}>TURN {turnCount}</Text>
+}>(({ turnCount, gameState, isAnimating, weather, playerHazards, opponentHazards, playerScreens, opponentScreens, sizes }) => {
+  // The battle/total timers live inside the bar so their once-per-second ticks
+  // re-render only this component — not the whole BattleScreen tree.
+  const [totalTimer, setTotalTimer] = useState(0);
+  const [turnTimer, setTurnTimer]   = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTotalTimer(t => t + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+  useEffect(() => {
+    setTurnTimer(0);
+    if (gameState === 'battle' && !isAnimating) {
+      const id = setInterval(() => setTurnTimer(t => t + 1), 1000);
+      return () => clearInterval(id);
+    }
+  }, [turnCount, gameState, isAnimating]);
+
+  return (
+    <View style={[tbS.bar, { paddingVertical: sizes.compact ? 3 : 5 }]}>
+      <View style={tbS.turnBadge}>
+        <Text style={[tbS.turnTxt, { fontSize: sizes.topBarFont }]}>TURN {turnCount}</Text>
+      </View>
+      <FieldBanner weather={weather} playerHazards={playerHazards} opponentHazards={opponentHazards} playerScreens={playerScreens} opponentScreens={opponentScreens} fontSize={sizes.topBarFont} />
+      <View style={tbS.timers}>
+        <Text style={[tbS.timeTxt, { fontSize: sizes.topBarFont }]}>⏱ {fmtTime(turnTimer)}</Text>
+        <Text style={[tbS.timeTxt, { fontSize: sizes.topBarFont, color: '#475569' }]}>·</Text>
+        <Text style={[tbS.timeTxt, { fontSize: sizes.topBarFont }]}>{fmtTime(totalTimer)}</Text>
+      </View>
     </View>
-    <FieldBanner weather={weather} playerHazards={playerHazards} opponentHazards={opponentHazards} playerScreens={playerScreens} opponentScreens={opponentScreens} fontSize={sizes.topBarFont} />
-    <View style={tbS.timers}>
-      <Text style={[tbS.timeTxt, { fontSize: sizes.topBarFont }]}>⏱ {fmtTime(turnTimer)}</Text>
-      <Text style={[tbS.timeTxt, { fontSize: sizes.topBarFont, color: '#475569' }]}>·</Text>
-      <Text style={[tbS.timeTxt, { fontSize: sizes.topBarFont }]}>{fmtTime(totalTimer)}</Text>
-    </View>
-  </View>
-);
+  );
+});
 const tbS = StyleSheet.create({
   bar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, backgroundColor: '#0f172a', borderBottomWidth: 2, borderBottomColor: '#334155' },
   turnBadge: { backgroundColor: '#1E293B', borderRadius: 4, paddingHorizontal: 8, paddingVertical: 2, borderWidth: 1, borderColor: '#334155' },
@@ -361,7 +403,7 @@ const BANNER_MAX_LINES = 3; // recent narration lines kept per side
 type BannerEntry = { id: number; text: string };
 
 // One narration line — fades + slides in when it mounts (so only NEW lines animate).
-const BannerLine: React.FC<{ text: string; fontSize: number; dim: boolean }> = ({ text, fontSize, dim }) => {
+const BannerLine = React.memo<{ text: string; fontSize: number; dim: boolean }>(({ text, fontSize, dim }) => {
   const anim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.timing(anim, { toValue: 1, duration: 220, useNativeDriver: true }).start();
@@ -382,12 +424,12 @@ const BannerLine: React.FC<{ text: string; fontSize: number; dim: boolean }> = (
       {text}
     </Animated.Text>
   );
-};
+});
 
 // Single narration banner — one shared block whose content + accent colour
 // reflect whichever Pokémon is currently acting (it resets between sides). When
 // it clears it fades + slides out (staying mounted on its last lines until done).
-const MoveBanner: React.FC<{ lines: BannerEntry[]; fontSize: number; accent: string }> = ({ lines, fontSize, accent }) => {
+const MoveBanner = React.memo<{ lines: BannerEntry[]; fontSize: number; accent: string }>(({ lines, fontSize, accent }) => {
   const fade = useRef(new Animated.Value(0)).current;
   const [render, setRender] = useState<BannerEntry[]>(lines);
 
@@ -418,7 +460,7 @@ const MoveBanner: React.FC<{ lines: BannerEntry[]; fontSize: number; accent: str
       ))}
     </Animated.View>
   );
-};
+});
 const bnrS = StyleSheet.create({
   wrap: {
     position: 'absolute',
@@ -439,7 +481,7 @@ const bnrS = StyleSheet.create({
 
 // ─── Animated HP bar fill ───────────────────────────────────────────────────────
 // `pct` is the raw current/max ratio (0-1); a sliver stays visible at low-but-alive HP.
-const AnimatedHpFill: React.FC<{ pct: number; color: string; style: object }> = ({ pct, color, style }) => {
+const AnimatedHpFill = React.memo<{ pct: number; color: string; style: object }>(({ pct, color, style }) => {
   const displayPct = pct > 0 ? Math.max(pct, 0.02) : 0;
   const anim = useRef(new Animated.Value(displayPct)).current;
   useEffect(() => {
@@ -454,17 +496,24 @@ const AnimatedHpFill: React.FC<{ pct: number; color: string; style: object }> = 
       },
     ]} />
   );
-};
+});
 
 // ─── Animated log line ────────────────────────────────────────────────────────
-const AnimatedLogLine: React.FC<{ text: string; textStyle: object; isNew: boolean }> = ({ text, textStyle, isNew }) => {
-  const opacity = useRef(new Animated.Value(isNew ? 0 : 1)).current;
-  useEffect(() => {
-    if (isNew)
-      Animated.timing(opacity, { toValue: 1, duration: LOG_FADE_MS, useNativeDriver: true }).start();
-  }, []);
-  return <Animated.Text style={[textStyle, { opacity }]}>{text}</Animated.Text>;
-};
+// Memoized with a text+isNew comparator: the log list re-renders on every
+// incremental append during the turn loop, but already-shown lines never need
+// to re-render (their style only changes on a window resize, which is fine to
+// defer). This keeps an N-line log from doing O(N) work on every append.
+const AnimatedLogLine = React.memo<{ text: string; textStyle: object; isNew: boolean }>(
+  ({ text, textStyle, isNew }) => {
+    const opacity = useRef(new Animated.Value(isNew ? 0 : 1)).current;
+    useEffect(() => {
+      if (isNew)
+        Animated.timing(opacity, { toValue: 1, duration: LOG_FADE_MS, useNativeDriver: true }).start();
+    }, []);
+    return <Animated.Text style={[textStyle, { opacity }]}>{text}</Animated.Text>;
+  },
+  (a, b) => a.text === b.text && a.isNew === b.isNew,
+);
 
 const STATUS_ABBR: Record<string, string> = {
   Burn: 'BRN', Freeze: 'FRZ', Paralysis: 'PAR',
@@ -472,13 +521,13 @@ const STATUS_ABBR: Record<string, string> = {
 };
 
 // ─── Battle info card ─────────────────────────────────────────────────────────
-const BattleInfoCard: React.FC<{
+const BattleInfoCard = React.memo<{
   pokemon: BattlePokemon;
   isPlayer: boolean;
   team: BattlePokemon[];
   activeIdx: number;
   sizes: Sizes;
-}> = ({ pokemon, isPlayer, team, activeIdx, sizes }) => {
+}>(({ pokemon, isPlayer, team, activeIdx, sizes }) => {
   const hpPct = pokemon.maxHp > 0 ? Math.max(0, pokemon.currentHp / pokemon.maxHp) : 0;
   const hpColor = hpPct > 0.5 ? '#4ade80' : hpPct > 0.2 ? '#facc15' : '#f87171';
   const hasStats = Object.values(pokemon.statStages).some(s => s !== 0) || pokemon.volatileStatuses.includes('Confusion');
@@ -539,7 +588,7 @@ const BattleInfoCard: React.FC<{
       </View>
     </View>
   );
-};
+});
 const cS = StyleSheet.create({
   hud: { flexDirection: 'row', backgroundColor: 'rgba(30, 41, 59, 0.9)', borderRadius: 8, overflow: 'hidden', borderWidth: 1, borderColor: '#334155' },
   accentBar: { width: 4 },
@@ -720,14 +769,14 @@ const shtS = StyleSheet.create({
 });
 
 // ─── Move button ────────────────────────────────────────────────────────────
-const MoveButton: React.FC<{
+const MoveButton = React.memo<{
   move: Move;
   isSelected: boolean;
   isLockedOut: boolean;
   disabled: boolean;
   sizes: Sizes;
   onPress: () => void;
-}> = ({ move, isSelected, isLockedOut, disabled, sizes, onPress }) => {
+}>(({ move, isSelected, isLockedOut, disabled, sizes, onPress }) => {
   const tc = TYPE_COLORS[move.type] ?? '#6B7280';
   const pp = move.currentPp ?? move.pp;
   const ppPct = move.pp > 0 ? pp / move.pp : 0;
@@ -755,7 +804,7 @@ const MoveButton: React.FC<{
       </View>
     </TouchableOpacity>
   );
-};
+});
 const mbS = StyleSheet.create({
   btn:       { flexBasis: '48%', flexGrow: 1, borderRadius: 8, padding: 8, justifyContent: 'space-between', elevation: 2, borderWidth: 2, borderColor: 'rgba(0,0,0,0.2)' },
   btnSelected: { borderColor: '#FFF', borderWidth: 2 },
@@ -783,7 +832,9 @@ export const BattleScreen: React.FC = () => {
 
   const { width: winWidth, height: winHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const sizes = getSizes(winWidth, winHeight);
+  // Re-derive only when the window actually resizes — not on every turn/state
+  // update (this screen re-renders a lot during the battle loop).
+  const sizes = useMemo(() => getSizes(winWidth, winHeight), [winWidth, winHeight]);
   // Full-width controls bar: two rows of move buttons + padding. Tall enough that
   // both rows are fully visible (the moves fill it, so they never overflow).
   const controlsHeight = Math.round(sizes.moveBtnMinHeight * 2.5 + 30);
@@ -805,8 +856,6 @@ export const BattleScreen: React.FC = () => {
   // whenever the acting Pokémon changes.
   const [banner, setBanner]                 = useState<{ side: 'player' | 'opponent'; lines: BannerEntry[] } | null>(null);
   const bannerIdRef                         = useRef(0);
-  const [totalTimer, setTotalTimer]         = useState(0);
-  const [turnTimer, setTurnTimer]           = useState(0);
   // Measured space available to the battle scene; the arena is locked to 16:9
   // inside it (letterboxed) so the scene looks identical on every screen size.
   const [arenaBox, setArenaBox]             = useState({ width: 0, height: 0 });
@@ -818,16 +867,28 @@ export const BattleScreen: React.FC = () => {
   const oppSpriteOpacity     = useRef(new Animated.Value(1)).current;
   const oppSpriteX           = useRef(new Animated.Value(0)).current;
   const oppSpriteY           = useRef(new Animated.Value(0)).current;
+  // Scale drives the Black/White-style send-out: the sprite spawns small and
+  // grows to full size as it drops into place. Rests at 1 the rest of the time.
+  const playerSpriteScale    = useRef(new Animated.Value(1)).current;
+  const oppSpriteScale       = useRef(new Animated.Value(1)).current;
   // Which side (if any) is mid-faint — clips its sprite at the baseline so the
   // slide-down reads as sinking into the ground (original-game style).
   const [faintClip, setFaintClip] = useState<'player' | 'opponent' | null>(null);
 
   const scrollRef        = useRef<ScrollView>(null);
   const cancelRef        = useRef(false);
-  const totalIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const turnIntervalRef  = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastOpponentIdRef = useRef<string | null>(null);
   const isAnimatingRef   = useRef(false);
+
+  // User settings, mirrored to refs so the long-running async turn animation
+  // always reads current values (even if changed mid-battle) without stale
+  // closures. Cries are gated on sound; the pacing pauses scale with speed.
+  const soundEnabled = useSettingsStore(s => s.soundEnabled);
+  const battleSpeed  = useSettingsStore(s => s.battleSpeed);
+  const soundRef     = useRef(soundEnabled);
+  const speedRef     = useRef(SPEED_FACTOR[battleSpeed]);
+  soundRef.current   = soundEnabled;
+  speedRef.current   = SPEED_FACTOR[battleSpeed];
 
   // ── Cries ─────────────────────────────────────────────────────────────────
   // Separate players per side so an entry cry never cuts the other off. Each
@@ -844,39 +905,48 @@ export const BattleScreen: React.FC = () => {
     };
   }, []);
 
-  const playCry = (ref: React.MutableRefObject<AudioPlayer | null>, baseId?: string) => {
+  // Load a side's cry into its player so a later play() is instant. Calling
+  // replace() and play() back-to-back has a cold-load delay that made cries lag
+  // the on-field reveal by a noticeable beat — preloading removes that lag.
+  const preloadCry = (ref: React.MutableRefObject<AudioPlayer | null>, baseId?: string) => {
     const cry = cryFor(baseId);
-    const player = ref.current;
-    if (!cry || !player) return;
-    try { player.replace(cry); player.seekTo(0); player.play(); } catch { /* ignore */ }
+    if (!cry || !ref.current) return;
+    try { ref.current.replace(cry); } catch { /* ignore */ }
+  };
+  const playCry = (ref: React.MutableRefObject<AudioPlayer | null>) => {
+    if (!soundRef.current) return;
+    try { ref.current?.seekTo(0); ref.current?.play(); } catch { /* ignore */ }
   };
 
-  // Play each side's cry whenever its active Pokémon changes — fires on battle
-  // start (mount) and on every switch-in. The opponent's cry leads, like the
-  // games, with the player's following a beat later.
+  // Each side's cry rides on its send-out. The opening cries are staggered by
+  // the battle-intro sequence below; mid-battle switch-ins cry here. We key off
+  // the active Pokémon's battle id and skip the opener (prev id null/cleared) so
+  // the intro owns it. Tracking ids — not a once-per-mount flag — keeps this
+  // correct across repeated battles that reuse this screen without remounting,
+  // where a stuck flag made battle 2+ fire both cries at once.
+  const prevPlayerCryIdRef = useRef<string | undefined>(undefined);
+  const prevOppCryIdRef    = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (opponentPokemon) playCry(oppCryRef, opponentPokemon.baseId);
-  }, [opponentPokemon?.baseId]);
-  useEffect(() => {
-    if (!playerPokemon) return;
-    const t = setTimeout(() => playCry(playerCryRef, playerPokemon.baseId), 650);
+    const id = opponentPokemon?.id;
+    const prev = prevOppCryIdRef.current;
+    prevOppCryIdRef.current = id;
+    preloadCry(oppCryRef, opponentPokemon?.baseId);
+    if (!prev || !id || id === prev) return;  // opener / cleared → intro handles it
+    const t = setTimeout(() => playCry(oppCryRef), 180);
     return () => clearTimeout(t);
-  }, [playerPokemon?.baseId]);
-
-  // Timers
+  }, [opponentPokemon?.id]);
   useEffect(() => {
-    totalIntervalRef.current = setInterval(() => setTotalTimer(t => t + 1), 1000);
-    return () => { if (totalIntervalRef.current) clearInterval(totalIntervalRef.current); };
-  }, []);
+    const id = playerPokemon?.id;
+    const prev = prevPlayerCryIdRef.current;
+    prevPlayerCryIdRef.current = id;
+    preloadCry(playerCryRef, playerPokemon?.baseId);
+    if (!prev || !id || id === prev) return;
+    const t = setTimeout(() => playCry(playerCryRef), 180);
+    return () => clearTimeout(t);
+  }, [playerPokemon?.id]);
 
-  useEffect(() => {
-    setTurnTimer(0);
-    if (turnIntervalRef.current) clearInterval(turnIntervalRef.current);
-    if (gameState === 'battle' && !isAnimating) {
-      turnIntervalRef.current = setInterval(() => setTurnTimer(t => t + 1), 1000);
-    }
-    return () => { if (turnIntervalRef.current) clearInterval(turnIntervalRef.current); };
-  }, [turnCount, gameState, isAnimating]);
+  // (Battle/total timers now live inside <TopBar> so their per-second ticks
+  // don't re-render this whole screen.)
 
   // Sync display when not animating
   useEffect(() => {
@@ -913,7 +983,8 @@ export const BattleScreen: React.FC = () => {
     if (gameState === 'battle') setSwitchModalVisible(false);
   }, [gameState]);
 
-  const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+  // Pacing pauses scale with the battle-speed setting (fast = half, slow = 1.5×).
+  const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms * speedRef.current));
 
   // ─── Sprite animations ────────────────────────────────────────────────────────
   // Faint: the sprite slides straight down and is clipped at its baseline, so it
@@ -933,19 +1004,23 @@ export const BattleScreen: React.FC = () => {
     }).start(() => resolve());
   });
 
+  // Black/White-style send-out: the sprite pops in small and a touch above its
+  // spot, scales up to full size, and drops down to land with a short bounce.
   const animateSwitchIn = (target: 'player' | 'opponent') => new Promise<void>(resolve => {
     const opacityRef = target === 'player' ? playerSpriteOpacity : oppSpriteOpacity;
     const xRef       = target === 'player' ? playerSpriteX       : oppSpriteX;
     const yRef       = target === 'player' ? playerSpriteY       : oppSpriteY;
-    const fromX      = target === 'player' ? -80 : 80;
-    // Undo any leftover faint slide/clip before the replacement slides in.
+    const scaleRef   = target === 'player' ? playerSpriteScale   : oppSpriteScale;
+    // Undo any leftover faint slide/clip before the replacement spawns in.
     if (faintClip === target) setFaintClip(null);
-    yRef.setValue(0);
+    xRef.setValue(0);
+    yRef.setValue(-34);   // start above the baseline so it falls into place
+    scaleRef.setValue(0.25);
     opacityRef.setValue(0);
-    xRef.setValue(fromX);
     Animated.parallel([
-      Animated.timing(opacityRef, { toValue: 1,   duration: SWITCH_IN_MS, useNativeDriver: true }),
-      Animated.timing(xRef,       { toValue: 0,   duration: SWITCH_IN_MS, useNativeDriver: true }),
+      Animated.timing(opacityRef, { toValue: 1, duration: 150, useNativeDriver: true }),
+      Animated.timing(scaleRef,   { toValue: 1, duration: REVEAL_MS, easing: Easing.out(Easing.back(1.4)), useNativeDriver: true }),
+      Animated.timing(yRef,       { toValue: 0, duration: REVEAL_MS, easing: Easing.bounce, useNativeDriver: true }),
     ]).start(() => resolve());
   });
 
@@ -958,6 +1033,53 @@ export const BattleScreen: React.FC = () => {
       Animated.timing(xRef,       { toValue: toX, duration: SWITCH_IN_MS, useNativeDriver: true }),
     ]).start(() => resolve());
   });
+
+  // ── Battle intro ────────────────────────────────────────────────────────────
+  // Stagger the opening reveal so the two Pokémon don't pop onto the field (and
+  // cry) at the same instant: the player slides in and cries first, then a beat
+  // later the opponent does. Edge-triggered on each battle start so it replays
+  // correctly when this screen is reused for a rematch without remounting.
+  const inBattleRef   = useRef(false);
+  const introTokenRef = useRef(0);
+  useLayoutEffect(() => {
+    const inBattle = !!(playerPokemon && opponentPokemon);
+    if (inBattle && !inBattleRef.current) {
+      // Hide both before paint so the new leads never flash in at full size
+      // before their staggered reveal.
+      playerSpriteOpacity.setValue(0);
+      oppSpriteOpacity.setValue(0);
+    } else if (!inBattle) {
+      // Battle ended/reset — let the opponent reveal effect treat the next
+      // battle's lead as a fresh send-out (intro), not an in-battle switch.
+      lastOpponentIdRef.current = null;
+    }
+  }, [playerPokemon, opponentPokemon]);
+  useEffect(() => {
+    const inBattle = !!(playerPokemon && opponentPokemon);
+    const was = inBattleRef.current;
+    inBattleRef.current = inBattle;
+    if (!inBattle || was) return;  // run only on the battle-start edge
+    const token = ++introTokenRef.current;
+    preloadCry(playerCryRef, playerPokemon!.baseId);
+    preloadCry(oppCryRef, opponentPokemon!.baseId);
+    // Wait for the navigation transition + first-frame work to settle before
+    // revealing — otherwise the reveal animates during that jank and is missed.
+    // The token guards against a stale intro firing after a new battle/unmount.
+    InteractionManager.runAfterInteractions(async () => {
+      if (introTokenRef.current !== token) return;
+      await sleep(220);
+      if (introTokenRef.current !== token) return;
+      await animateSwitchIn('player');
+      if (introTokenRef.current !== token) return;
+      playCry(playerCryRef);
+      await sleep(820);
+      if (introTokenRef.current !== token) return;
+      await animateSwitchIn('opponent');
+      if (introTokenRef.current !== token) return;
+      playCry(oppCryRef);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playerPokemon, opponentPokemon]);
 
   // Attacker steps toward its foe and snaps back as a move resolves. Player sits
   // bottom-left and the opponent top-right, so each lunges diagonally inward.
@@ -1005,7 +1127,6 @@ export const BattleScreen: React.FC = () => {
     cancelRef.current = false;
     setIsAnimating(true);
     setSelectedMoveId(null);
-    if (turnIntervalRef.current) clearInterval(turnIntervalRef.current);
 
     const result = action.type === 'switch' ? prepareSwitchTurn(action.idx) : prepareTurn(action.moveId);
     if (!result || cancelRef.current) { 
@@ -1270,7 +1391,7 @@ export const BattleScreen: React.FC = () => {
         if (cancelRef.current) break;
 
         // Now trigger the HP bar animation
-        if (line.includes('restored its HP')) {
+        if (line.includes('restored its HP') || line.includes('recovered')) {
           // handled below by the recovered/restored block
         } else if (hurtOpponent(line, currentOppName)) {
           const before = runningOppHp;
@@ -1303,10 +1424,17 @@ export const BattleScreen: React.FC = () => {
             setPopups(prev => [...prev, { id: Math.random().toString(), text: `-${delta} HP`, target: 'player', type: 'damage' }]);
           }
         }
-        if (line.includes('recovered HP') || line.includes('restored its HP')) {
+        if ((line.includes('recovered') && line.includes('HP')) || line.includes('restored its HP')) {
+          // Apply the explicit healed amount relative to the running HP so the
+          // bar steps to the post-heal value — NOT the engine's final HP, which
+          // would already have end-of-turn chip damage (burn/poison/trap)
+          // subtracted and make a later damage line have nothing left to animate.
+          const healMatch = line.match(/recovered (\d+) HP/i);
           if (line.startsWith(currentOppName + ' recovered') || line.startsWith(currentOppName + ' restored')) {
             const before = runningOppHp;
-            runningOppHp = result.opponent.currentHp;
+            runningOppHp = healMatch
+              ? Math.min(currentOppMaxHp, runningOppHp + parseInt(healMatch[1], 10))
+              : result.opponent.currentHp;
             setDisplayOpp(prev => prev ? { ...prev, currentHp: runningOppHp } : prev);
             const delta = runningOppHp - before;
             if (delta > 0) {
@@ -1315,7 +1443,9 @@ export const BattleScreen: React.FC = () => {
           }
           if (line.startsWith(currentPlayerName + ' recovered') || line.startsWith(currentPlayerName + ' restored')) {
             const before = runningPlayerHp;
-            runningPlayerHp = result.player.currentHp;
+            runningPlayerHp = healMatch
+              ? Math.min(currentPlayerMaxHp, runningPlayerHp + parseInt(healMatch[1], 10))
+              : result.player.currentHp;
             setDisplayPlayer(prev => prev ? { ...prev, currentHp: runningPlayerHp } : prev);
             const delta = runningPlayerHp - before;
             if (delta > 0) {
@@ -1382,12 +1512,9 @@ export const BattleScreen: React.FC = () => {
     if (line.includes('fainted') || line.includes('Lost')) return logS.faint;
     if (line.includes('Win') || line.includes('sent out')) return logS.event;
     if (line.startsWith('---') || line.startsWith('===')) return logS.divider;
-    if (isHPChangeLog(line) || line.includes('recovered HP')) return logS.damage;
+    if (isHPChangeLog(line)) return logS.damage;
     return logS.normal;
   };
-
-  const fmtTime = (s: number) =>
-    `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
   // ── Error state ───────────────────────────────────────────────────────────────
   if (!playerPokemon || !opponentPokemon) {
@@ -1440,9 +1567,8 @@ export const BattleScreen: React.FC = () => {
         <View style={s.leftColumn}>
           <TopBar
             turnCount={turnCount}
-            totalTimer={totalTimer}
-            turnTimer={turnTimer}
-            fmtTime={fmtTime}
+            gameState={gameState}
+            isAnimating={isAnimating}
             weather={displayWeather}
             playerHazards={displayField.player.hazards}
             opponentHazards={displayField.opponent.hazards}
@@ -1476,7 +1602,7 @@ export const BattleScreen: React.FC = () => {
               <View style={s.spriteWrapEnemy}>
                 <View style={[s.baseShadow, { width: sizes.enemySprite * 0.7 }]} />
                 <View style={[s.spriteClip, { width: sizes.enemySprite, height: sizes.enemySprite }, faintClip === 'opponent' && s.spriteClipOn]}>
-                  <AnimatedExpoImage source={oppSprite} style={[{ width: '100%', height: '100%' }, { opacity: oppSpriteOpacity, transform: [{ translateX: oppSpriteX }, { translateY: oppSpriteY }] }]} contentFit="contain" contentPosition="bottom" cachePolicy="memory-disk" />
+                  <AnimatedExpoImage source={oppSprite} style={[{ width: '100%', height: '100%' }, { opacity: oppSpriteOpacity, transformOrigin: '50% 100%', transform: [{ translateX: oppSpriteX }, { translateY: oppSpriteY }, { scale: oppSpriteScale }] }]} contentFit="contain" contentPosition="bottom" cachePolicy="memory-disk" />
                 </View>
                 {popups.filter(p => p.target === 'opponent').map(p => (
                   <PopupAnimation key={p.id} popup={p} onComplete={id => setPopups(curr => curr.filter(x => x.id !== id))} />
@@ -1489,7 +1615,7 @@ export const BattleScreen: React.FC = () => {
               <View style={s.spriteWrapPlayer}>
                 <View style={[s.baseShadow, { width: sizes.playerSprite * 0.7 }]} />
                 <View style={[s.spriteClip, { width: sizes.playerSprite, height: sizes.playerSprite }, faintClip === 'player' && s.spriteClipOn]}>
-                  <AnimatedExpoImage source={playerSprite} style={[{ width: '100%', height: '100%' }, { opacity: playerSpriteOpacity, transform: [{ translateX: playerSpriteX }, { translateY: playerSpriteY }] }]} contentFit="contain" contentPosition="bottom" cachePolicy="memory-disk" />
+                  <AnimatedExpoImage source={playerSprite} style={[{ width: '100%', height: '100%' }, { opacity: playerSpriteOpacity, transformOrigin: '50% 100%', transform: [{ translateX: playerSpriteX }, { translateY: playerSpriteY }, { scale: playerSpriteScale }] }]} contentFit="contain" contentPosition="bottom" cachePolicy="memory-disk" />
                 </View>
                 {popups.filter(p => p.target === 'player').map(p => (
                   <PopupAnimation key={p.id} popup={p} onComplete={id => setPopups(curr => curr.filter(x => x.id !== id))} />
@@ -1536,9 +1662,12 @@ export const BattleScreen: React.FC = () => {
           <View style={s.logPanel}>
             <View style={s.logHeader}><Text style={s.logHeaderTxt}>Battle Log</Text></View>
             <ScrollView ref={scrollRef} style={s.logScroll} contentContainerStyle={s.logContent} showsVerticalScrollIndicator={false}>
-              {visibleLogs.map((line, idx) => (
-                <AnimatedLogLine key={`${idx}-${line}`} text={line || ' '} textStyle={[logS.base, { fontSize: sizes.logFont }, getLogStyle(line)]} isNew={idx >= newFromIdx} />
-              ))}
+              {visibleLogs.slice(Math.max(0, visibleLogs.length - LOG_RENDER_CAP)).map((line, i) => {
+                const idx = Math.max(0, visibleLogs.length - LOG_RENDER_CAP) + i;
+                return (
+                  <AnimatedLogLine key={`${idx}-${line}`} text={line || ' '} textStyle={[logS.base, { fontSize: sizes.logFont }, getLogStyle(line)]} isNew={idx >= newFromIdx} />
+                );
+              })}
               {isAnimating && <Animated.Text style={logS.cursor}>▌</Animated.Text>}
             </ScrollView>
           </View>

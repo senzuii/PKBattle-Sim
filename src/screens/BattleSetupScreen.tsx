@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useDeferredValue, useCallback, memo } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   TextInput,
   Modal,
   Image,
+  FlatList,
   useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -33,8 +34,22 @@ const MAX_TEAM_SIZE = 6;
 const defaultIvs = { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 };
 const defaultEvs = { hp: 84, atk: 84, def: 84, spa: 84, spd: 84, spe: 84 };
 
+// The legal move pool for a (species, gen) is deterministic but the scan is
+// expensive (every implemented move × recursive pre-evo learnset lookups), and
+// picking a species used to run it 2-3× over. Memoize it once per key.
+const _legalMovesCache = new Map<string, string[]>();
+const getLegalMoves = (speciesId: string, gen: number | null): string[] => {
+  const key = `${gen}|${speciesId}`;
+  let pool = _legalMovesCache.get(key);
+  if (!pool) {
+    pool = Object.keys(MOVES).filter(mId => isMoveLegalForPokemon(speciesId, mId, gen));
+    _legalMovesCache.set(key, pool);
+  }
+  return pool;
+};
+
 const getRandomMovesForPokemon = (speciesId: string, gen: number | null): string[] => {
-  const allLegal = Object.keys(MOVES).filter(mId => isMoveLegalForPokemon(speciesId, mId, gen));
+  const allLegal = getLegalMoves(speciesId, gen);
   if (allLegal.length === 0) return [];
   if (allLegal.length <= 4) return [...allLegal].sort(() => Math.random() - 0.5);
 
@@ -165,6 +180,52 @@ const slot = StyleSheet.create({
   lvlTxt: { color: '#64748B', fontSize: 9, fontWeight: '500' },
 });
 
+// ─── SpeciesCard ──────────────────────────────────────────────────────────────
+// Memoized so the virtualized species grid only re-renders cells whose props
+// actually change (not every cell on each keystroke).
+const SpeciesCard = memo<{ id: string; width: number; onPick: (id: string) => void }>(
+  ({ id, width, onPick }) => {
+    const poke = POKEMON[id];
+    const spr = FrontSprites[id.replace(/[^a-z0-9]/g, '')];
+    const types = poke.types ?? [];
+    return (
+      <TouchableOpacity style={[p.card, { width }]} onPress={() => onPick(id)} activeOpacity={0.7}>
+        <View style={p.cardSpriteWrap}>
+          {spr && <Image source={spr} style={p.cardSprite} resizeMode="contain" />}
+        </View>
+        <Text style={p.cardName} numberOfLines={1}>{poke.name}</Text>
+        <View style={p.cardTypes}>
+          {types.map(t => (
+            <View key={t} style={[p.cardTypePill, { backgroundColor: TYPE_COLORS[t] ?? '#555' }]}>
+              <Text style={p.cardTypeTxt}>{t.slice(0, 3).toUpperCase()}</Text>
+            </View>
+          ))}
+        </View>
+      </TouchableOpacity>
+    );
+  },
+);
+
+// ─── MoveRow ──────────────────────────────────────────────────────────────────
+const MoveRow = memo<{ id: string; onPick: (id: string) => void }>(({ id, onPick }) => {
+  const move = MOVES[id];
+  const tc = TYPE_COLORS[move.type] ?? '#334155';
+  return (
+    <TouchableOpacity style={mv.row} onPress={() => onPick(id)} activeOpacity={0.7}>
+      <View style={[mv.accent, { backgroundColor: tc }]} />
+      <Text style={mv.name}>{move.name}</Text>
+      <View style={{ flexDirection: 'row', gap: 6, marginLeft: 'auto' }}>
+        <View style={[mv.badge, { backgroundColor: tc }]}>
+          <Text style={mv.badgeTxt}>{move.type.toUpperCase()}</Text>
+        </View>
+        <View style={mv.catBadge}>
+          <Text style={mv.catTxt}>{move.category.toUpperCase()}</Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+});
+
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export const BattleSetupScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -238,25 +299,40 @@ export const BattleSetupScreen: React.FC = () => {
     [selectedGeneration]
   );
 
-  const filteredSpecies = useMemo(() =>
-    allSpeciesIds.filter(id => POKEMON[id].name.toLowerCase().includes(search.toLowerCase())),
-    [allSpeciesIds, search]);
+  // Defer the search text so the TextInput stays responsive while the large
+  // virtualized grids re-filter (React 19 concurrent rendering).
+  const deferredSearch = useDeferredValue(search);
+  const deferredMoveSearch = useDeferredValue(moveSearch);
+
+  const filteredSpecies = useMemo(() => {
+    const q = deferredSearch.trim().toLowerCase();
+    return q ? allSpeciesIds.filter(id => POKEMON[id].name.toLowerCase().includes(q)) : allSpeciesIds;
+  }, [allSpeciesIds, deferredSearch]);
+
+  // Picker grid sizing: ~96px cards. Sheet is width:100% capped at maxWidth 860,
+  // with 12px grid padding each side.
+  const pickerCols = useMemo(() => {
+    const avail = Math.min(width - 32, 860) - 24;
+    return Math.max(2, Math.floor(avail / 104));
+  }, [width]);
+  const pickerCardW = useMemo(() => {
+    const avail = Math.min(width - 32, 860) - 24;
+    return Math.min(110, Math.floor(avail / pickerCols) - 8);
+  }, [width, pickerCols]);
 
   const legalMovesForEditing = useMemo(() => {
     if (!editingPokemon?.speciesId) return [];
-    return Object.keys(MOVES).filter(moveId =>
-      isMoveLegalForPokemon(editingPokemon.speciesId, moveId, selectedGeneration)
-    );
+    return getLegalMoves(editingPokemon.speciesId, selectedGeneration);
   }, [editingPokemon?.speciesId, selectedGeneration]);
 
   const filteredLegalMoves = useMemo(() => {
-    if (!moveSearch.trim()) return legalMovesForEditing;
-    const q = moveSearch.toLowerCase();
+    if (!deferredMoveSearch.trim()) return legalMovesForEditing;
+    const q = deferredMoveSearch.toLowerCase();
     return legalMovesForEditing.filter(moveId => {
       const move = MOVES[moveId];
       return move && (move.name.toLowerCase().includes(q) || move.type.toLowerCase().includes(q) || move.category.toLowerCase().includes(q));
     });
-  }, [legalMovesForEditing, moveSearch]);
+  }, [legalMovesForEditing, deferredMoveSearch]);
 
   const openEditModal = (idx: number, target: 'player' | 'opponent' = 'player') => {
     setEditingTarget(target);
@@ -298,14 +374,12 @@ export const BattleSetupScreen: React.FC = () => {
     setEditingPokemon(prev => prev ? { ...prev, moves: getRandomMovesForPokemon(prev.speciesId, selectedGeneration) } : null);
   };
 
-  const handlePickSpecies = (speciesId: string) => {
+  const handlePickSpecies = useCallback((speciesId: string) => {
     const poke = POKEMON[speciesId];
 
     // Use the full legal move pool (all sources: level-up, TM, HM, tutor, egg)
     // — same data source as the move picker itself.
-    const fullLegal = Object.keys(MOVES).filter(mId =>
-      isMoveLegalForPokemon(speciesId, mId, selectedGeneration)
-    );
+    const fullLegal = getLegalMoves(speciesId, selectedGeneration);
 
     // Prefer STAB moves first, then fill up to 4 from the rest
     const stabMoves = fullLegal.filter(mId => {
@@ -333,16 +407,16 @@ export const BattleSetupScreen: React.FC = () => {
       heldItem: prev?.heldItem || '',
     }));
     setSpeciesPickerVisible(false);
-  };
+  }, [selectedGeneration]);
 
-  const handlePickMove = (moveId: string) => {
+  const handlePickMove = useCallback((moveId: string) => {
     if (pickingMoveIndex === null || !editingPokemon) return;
     const newMoves = [...editingPokemon.moves];
     while (newMoves.length <= pickingMoveIndex) newMoves.push('');
     newMoves[pickingMoveIndex] = moveId;
     setEditingPokemon({ ...editingPokemon, moves: newMoves.filter(Boolean) });
     setMovePickerVisible(false);
-  };
+  }, [pickingMoveIndex, editingPokemon]);
 
   const handleRandomTeam = () => {
     const shuffled = [...allSpeciesIds].sort(() => Math.random() - 0.5).slice(0, MAX_TEAM_SIZE);
@@ -817,28 +891,23 @@ export const BattleSetupScreen: React.FC = () => {
                 </TouchableOpacity>
               )}
             </View>
-            <ScrollView contentContainerStyle={p.grid}>
-              {filteredSpecies.map(id => {
-                const poke = POKEMON[id];
-                const spr = FrontSprites[id.replace(/[^a-z0-9]/g, '')];
-                const types = poke.types ?? [];
-                return (
-                  <TouchableOpacity key={id} style={p.card} onPress={() => handlePickSpecies(id)} activeOpacity={0.7}>
-                    <View style={p.cardSpriteWrap}>
-                      {spr && <Image source={spr} style={p.cardSprite} resizeMode="contain" />}
-                    </View>
-                    <Text style={p.cardName} numberOfLines={1}>{poke.name}</Text>
-                    <View style={p.cardTypes}>
-                      {types.map(t => (
-                        <View key={t} style={[p.cardTypePill, { backgroundColor: TYPE_COLORS[t] ?? '#555' }]}>
-                          <Text style={p.cardTypeTxt}>{t.slice(0, 3).toUpperCase()}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
+            <FlatList
+              data={filteredSpecies}
+              key={pickerCols}
+              numColumns={pickerCols}
+              keyExtractor={(id) => id}
+              contentContainerStyle={p.grid}
+              columnWrapperStyle={{ gap: 8, justifyContent: 'center' }}
+              ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+              initialNumToRender={24}
+              maxToRenderPerBatch={24}
+              windowSize={5}
+              removeClippedSubviews
+              keyboardShouldPersistTaps="handled"
+              renderItem={({ item }) => (
+                <SpeciesCard id={item} width={pickerCardW} onPick={handlePickSpecies} />
+              )}
+            />
           </View>
         </View>
       </Modal>
@@ -869,26 +938,17 @@ export const BattleSetupScreen: React.FC = () => {
                 </TouchableOpacity>
               )}
             </View>
-            <ScrollView contentContainerStyle={{ padding: 8 }}>
-              {filteredLegalMoves.map(id => {
-                const move = MOVES[id];
-                const tc = TYPE_COLORS[move.type] ?? '#334155';
-                return (
-                  <TouchableOpacity key={id} style={mv.row} onPress={() => handlePickMove(id)} activeOpacity={0.7}>
-                    <View style={[mv.accent, { backgroundColor: tc }]} />
-                    <Text style={mv.name}>{move.name}</Text>
-                    <View style={{ flexDirection: 'row', gap: 6, marginLeft: 'auto' }}>
-                      <View style={[mv.badge, { backgroundColor: tc }]}>
-                        <Text style={mv.badgeTxt}>{move.type.toUpperCase()}</Text>
-                      </View>
-                      <View style={mv.catBadge}>
-                        <Text style={mv.catTxt}>{move.category.toUpperCase()}</Text>
-                      </View>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
+            <FlatList
+              data={filteredLegalMoves}
+              keyExtractor={(id) => id}
+              contentContainerStyle={{ padding: 8 }}
+              initialNumToRender={16}
+              maxToRenderPerBatch={16}
+              windowSize={7}
+              removeClippedSubviews
+              keyboardShouldPersistTaps="handled"
+              renderItem={({ item }) => <MoveRow id={item} onPick={handlePickMove} />}
+            />
           </View>
         </View>
       </Modal>

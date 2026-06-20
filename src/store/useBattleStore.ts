@@ -322,7 +322,7 @@ export const useBattleStore = create<BattleStore>((set, get) => ({
     }
     if (!playerMove) return null;
 
-    let opponentMove = selectAIMove(difficulty, opponentPokemon, playerPokemon, playerMove);
+    let opponentMove = selectAIMove(difficulty, opponentPokemon, playerPokemon, playerMove, field);
     if (opponentPokemon.lockedMove) {
       opponentMove = opponentPokemon.moves.find((m) => m.id === opponentPokemon.lockedMove!.moveId) || opponentMove;
     }
@@ -342,12 +342,6 @@ export const useBattleStore = create<BattleStore>((set, get) => ({
       playerActiveIdx, opponentActiveIdx,
     } = get();
     if (!pendingResult) return;
-
-    // --- TERMINAL LOGGING FOR DEBUGGING ---
-    console.log(`\n=== TURN ${turnCount + 1} LOG ===`);
-    console.log(pendingResult.logs.join('\n'));
-    console.log(`======================\n`);
-    // --------------------------------------
 
     const newLogs = [...logs, ...pendingResult.logs];
 
@@ -502,7 +496,7 @@ export const useBattleStore = create<BattleStore>((set, get) => ({
     if (!playerPokemon || !opponentPokemon) return null;
 
     // Opponent gets a free action against the incoming Pokémon
-    let opponentMove = selectAIMove(difficulty, opponentPokemon, incoming, incoming.moves[0]);
+    let opponentMove = selectAIMove(difficulty, opponentPokemon, incoming, incoming.moves[0], field);
     if (opponentPokemon.lockedMove) {
       opponentMove = opponentPokemon.moves.find((m) => m.id === opponentPokemon.lockedMove!.moveId) || opponentMove;
     }
